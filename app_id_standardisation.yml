@@ -1,0 +1,118 @@
+- name: Update custom attributes in build.json
+  hosts: servers1
+  become: yes
+  gather_facts: false
+  vars: 
+    json_string: 
+      { 
+        "appdynamics": {
+            "machineagent": {
+              "default": {
+                "disable": false
+              },
+              "maintain": {
+                "disable": false
+              }
+            }
+          }
+      }
+  tasks:
+  - name: Check enough space available in /opt/appdynamics
+    shell: df -mP /opt/appdynamics|grep -vi Filesystem|awk '{print $4}'
+    register: df_appd
+    ignore_errors: yes
+
+  - name: Check /opt storage if /opt/appdynamics FS not existing
+    shell: df -mP /opt|grep -vi Filesystem|awk '{print $4}'
+    register: df_appd_opt
+    ignore_errors: yes
+    when: df_appd.rc != 0
+
+  - name: Fail if not enough space available in /opt or /opt/appdynamics
+    fail: 
+      msg: 'Not enough space in /opt. Available space: {{ df_appd_opt.stdout|trim }}'
+    when: "(df_appd.rc is defined and df_appd.rc == 0 and df_appd.stdout|trim|int < 500) or 
+      (df_appd_opt.rc is defined and df_appd_opt.rc == 0 and df_appd_opt.stdout|trim|int < 600)"
+
+  - name: Check build.json exists
+    stat: 
+      path: /var/build/build.json
+    register: build_json_stat
+
+  - fail:
+      msg: "/var/build/build.json file not exists"
+    when: not build_json_stat.stat.exists 
+
+  - name: Take backup of build.json
+    copy: 
+      src: /var/build/build.json
+      dest: /var/build/build_orig.json
+      backup: true
+      remote_src: true
+
+  - name: Load var from /var/build/build.json
+    slurp:
+      src: /var/build/build.json
+    register: imported_json_var
+
+  - name: Confirm to go ahead
+    pause: 
+
+  - name: append imported_var
+    set_fact:
+      updated_json_var: "{{ imported_json_var.content|b64decode|from_json | default([]) | combine(json_string, recursive=True) }}"
+
+  - name: Update /var/build/build.json
+    copy: 
+      content: "{{ updated_json_var | to_nice_json }}" 
+      dest: /var/build/build.json
+      mode: 0644
+      owner: root
+      group: root
+    register: build_update
+
+  - name: Load var from /var/build/build.json for verification
+    slurp:
+      src: /var/build/build.json
+    register: build_value_r
+
+  - name: Show the content of build.json after the update
+    debug: 
+      msg: "{{ build_value_r.content|b64decode|from_json }}"
+
+  - name: Stop appdynamics service
+    service:
+      name: appdynamics-machine-agent
+      state: stopped
+      enabled: no
+    ignore_errors: yes
+      
+  - name: Make sure you are going to run the appd cookbook next
+    pause: 
+
+  # - name: Rename /opt/appdynamics/machineagent to /opt/appdynamics/machineagent_old
+  #   command: mv /opt/appdynamics/machineagent /opt/appdynamics/machineagent_old
+
+  - name: Run cookbook again
+    shell: chef-client -n appdynamics_machineagent_maintain -j /var/build/build.json
+    when: build_update is success
+    register: cookbook_run_2
+    ignore_errors: yes
+
+  - assert:
+      that: 
+        - "'start service service' in cookbook_run_2.stdout or 'action start' in cookbook_run_2.stdout"
+        - cookbook_run_2 is success
+
+    
+
+
+    #       { 
+    #   "appdynamics": {
+    #     "linux_monitors": {
+    #       "linuxmonitor_extensions": {
+    #         "enabled": true
+    #       }
+    #     }
+    #   }
+    # }

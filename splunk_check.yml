@@ -1,0 +1,219 @@
+- hosts: servers1
+  become: yes
+  gather_facts: yes
+  vars:
+    splunk_version_latest: '8.0.6'
+  tasks:
+
+  - name: Remove the old splunk_status file
+    file:
+      path: /home/m054363/splunk_status.csv
+      state: absent
+    become: no
+    delegate_to: localhost
+    run_once: true
+
+  - name: Get server Environment
+    shell: lookup -s {{ inventory_hostname.split('.')[0]}} | grep Environment|cut -d ":" -f 2|tr -d ' '
+    register: environ
+    delegate_to: localhost
+    become: no
+
+### Check initd splunk files present in the system
+  - name: List splunk scripts in init.d, rc.d
+    find:
+      paths: [/etc/rc.d, /etc/init.d, /etc/systemd/system]
+      patterns: '*splunk*'
+      file_type: any
+      recurse: yes
+    register: initd_splunk_files 
+
+  - name: 1 | Create a list of initd splunk scripts present in system
+    set_fact:
+      splunk_init_files: []
+
+  - name: 2 | Create a list of initd splunk scripts present in system
+    set_fact: 
+      splunk_init_files: "{{ splunk_init_files }} + [ '{{ item.path }}' ]"
+    loop: "{{ initd_splunk_files.files }}"
+
+  # - name: Show initd files for splunk
+  #   debug:
+  #     msg: "{{ splunk_init_files }}"
+
+### Check whether /opt/splunkforwarder is file system
+  - name: Check if /opt/splunkforwarder is file system
+    command: mountpoint -q /opt/splunkforwarder
+    failed_when: no
+    register: fs_stat
+
+### Check whether Splunk is at standard location
+  - name: Splunk is standard if /opt/splunkforwarder/bin/splunkd exists
+    stat: 
+      path: /opt/splunkforwarder/bin/splunkd
+    register: splunkd_stat_f
+
+## Get Splunk Home
+  - name: Find splunk home using running splunkd process
+    shell: /bin/readlink /proc/$(/sbin/pidof splunkd|awk '{print $1}')/exe
+    failed_when: no
+    register: splunkd_home
+
+  - name: Get splunk home for the hosts where splunk not running currently
+    block:
+      # - name: Check mlocate installed
+      #   command: rpm -q mlocate
+      #   failed_when: no
+      #   register: mlocate_stat
+      #   args:
+      #     warn: no
+
+      # - name: Install mlocate
+      #   yum:
+      #     name: mlocate
+      #     state: installed
+      #   when: mlocate_stat.rc != 0
+      #   ignore_errors: yes
+
+      - name: updateDB
+        command: updatedb
+        async: 40   #Timeout for this task or use 'timeout 40s updatedb'
+        ignore_errors: yes
+
+      - name: Locate splunkd 
+        command: locate -r bin/splunkd$
+        register: splunkd_location
+        failed_when: no
+    when: splunkd_home.rc != 0
+
+  - name: Set Fact splunk HOME
+    set_fact: 
+      splunk_home: "{{ splunkd_home.stdout.split('/bin/splunkd')[0] if splunkd_home.rc == 0 
+      else splunkd_location.stdout.split('/bin/splunkd')[0] if splunkd_location.rc == 0 else ''}}"
+
+### Check if splunk_home/etc/system/local/deploymentclient.conf and splunk_home/etc/system/local/inputs.conf exists
+  # - name: Check if splunk_home/etc/system/local/deploymentclient.conf exists
+  #   stat: 
+  #     path: '{{ splunk_home }}/etc/system/local/deploymentclient.conf'
+  #   register: deploymentclient_stat  
+
+  # - name: Check if splunk_home/etc/system/local/inputs.conf exists 
+  #   stat: 
+  #     path: '{{ splunk_home }}/etc/system/local/inputs.conf'
+  #   register: inputs_stat  
+
+  # - debug:
+  #     msg: "{{ splunk_home + '/etc/system/local/deploymentclient.conf exists' if deploymentclient_stat.stat.exists else ''}} : 
+  #       {{ splunk_home + '/etc/system/local/inputs.conf exists' if inputs_stat.stat.exists else ''}}"
+
+## Check chef_status
+  - name: Check /etc/chef/client.rb exists
+    stat:
+      path: /etc/chef/client.rb
+    register: chef_client
+  
+  - name: Check chef_client service is in systemd or init.d
+    stat:
+      path: "{{ '/etc/systemd/system/multi-user.target.wants/chef-client.service' if ansible_distribution_major_version == '7'
+      else '/etc/init.d/chef-client' if ansible_distribution_major_version == '6' }}"
+    register: chef_service_in_systemd
+
+
+## Check Running Splunk Version
+  - name: Check Running version of Splunk
+    shell: cat {{ splunk_home }}/etc/splunk.version|grep -i version|cut -d '=' -f2
+    register: splunk_ver
+
+## Check whether the system is a Sparrow server
+  - name: Check whether its a Sparrow Server
+    shell: /bin/df -lh|grep -i sparrow || /bin/ps -ef|grep -i sparrow|grep -v grep || /bin/ls -ld /sparrow
+    register: sparrow_st
+    failed_when: no
+
+## Check SplunkForwarder.service in systemd
+  - name: Check SplunkForwarder.service in systemd or init.d
+    stat:
+      path: "{{ '/etc/systemd/system/multi-user.target.wants/SplunkForwarder.service' if ansible_distribution_major_version == '7'
+      else '/etc/init.d/splunk' if ansible_distribution_major_version == '6' }}"
+    register: splunk_service_in_systemd
+
+## Check whether splunk maintain disabled in chef- host.json
+  - name: Read /etc/chef/host.json
+    slurp:
+      src: /etc/chef/host.json
+    register: chef_host
+    failed_when: no
+
+## Check whether splunk maintain disabled in chef - attrs_normal.json
+  - name: Read /var/chef/attributes/attrs_normal.json
+    slurp:
+      src: /var/chef/attributes/attrs_normal.json
+    register: chef_attrs_normal
+    failed_when: no
+
+  - name: Check whether Splunk maintain disabled in /etc/chef/host.json or /var/chef/attributes/attrs_normal.json
+    set_fact:
+      splunk_maintain_disabled_in_chef: "{{ true if (chef_attrs_normal.content|b64decode|from_json|json_query('wbc.rhel.splunk.maintain.disable')|bool and 
+      chef_attrs_normal.content is defined) or (chef_host.content|b64decode|from_json|json_query('wbc.rhel.splunk.maintain.disable')|bool and chef_host.content is defined) 
+      else false}}"
+    
+## Set Facts
+  - name: Set facts
+    set_fact:
+      splunkd_stat: "{{ 'splunkd running' if splunkd_home.rc == 0 else 'splunkd not running' }}"
+      splunk_version: "{{ splunk_ver.stdout if splunk_ver.rc == 0 else '' }}"
+      chef_stat: "{{ 'Chef' if (chef_client.stat.exists and chef_service_in_systemd.stat.exists) else 'No Chef' }}"
+      standard_location_type: "{{ 'File System' if fs_stat.rc == 0 else 'Directory'}}"
+      splunk_initd_files: "{{ 'splunk initd found' if splunk_init_files|length != 0 else ''}}"
+      sparrow_stat: "{{ 'Sparrow' if sparrow_st.rc == 0 else '' }}"
+      splunkforwarder_stat: "{{ True if splunk_service_in_systemd.stat.exists else False}}"
+      splunk_maintain_disabled: "{{ 'Splunk Disabled in Chef' if splunk_maintain_disabled_in_chef|bool }}"
+
+  - debug:
+      var: splunkforwarder_stat
+
+  - name: Set Fact | Get Overall Splunk Status
+    set_fact:
+      splunk_overall_stat: "{{ 'Good' if splunkd_stat == 'splunkd running' and splunk_version == splunk_version_latest 
+        and splunk_home == '/opt/splunkforwarder' and splunkforwarder_stat == True else ''}}"
+
+  - debug:
+      var: splunk_overall_stat
+
+  - name: Write to log
+    copy:
+      content: "{% for host in groups.servers1 %}
+        {{'\n'}}{{ hostvars[host].inventory_hostname }},
+        {{ hostvars[host].environ.stdout if hostvars[host].environ is defined}},
+        {{ hostvars[host].ansible_distribution_major_version if hostvars[host].ansible_distribution_major_version is defined }},
+        {{ hostvars[host].splunk_home if hostvars[host].splunk_home is defined else 'Server Cannot Connect using Ansible'}},
+        {{ hostvars[host].splunkd_stat if hostvars[host].splunkd_stat is defined }},
+        {{ hostvars[host].splunkforwarder_stat if hostvars[host].splunkforwarder_stat is defined}},
+        {{ hostvars[host].splunk_version if hostvars[host].splunk_version is defined }},
+        {{ hostvars[host].chef_stat if hostvars[host].chef_stat is defined }},
+        {{ hostvars[host].standard_location_type if hostvars[host].standard_location_type is defined }},
+        {{ hostvars[host].splunk_initd_files if hostvars[host].splunk_initd_files is defined }},
+        {{ hostvars[host].sparrow_stat if hostvars[host].sparrow_stat is defined }},
+        {{ hostvars[host].splunk_overall_stat if hostvars[host].splunk_overall_stat is defined}},
+        {{ hostvars[host].splunk_maintain_disabled if hostvars[host].splunk_maintain_disabled is defined}}
+        {% endfor %}"
+      dest: /home/m054363/splunk_status.csv
+    delegate_to: localhost
+    run_once: yes
+    become: no
+
+  - name: Update heading for /home/m054363/splunk_status.csv
+    lineinfile:
+      path: /home/m054363/splunk_status.csv
+      line: Hostname,Env,OS,Splunk Home,Splunkd Status,In Systemd/init.d?,Version,Chef Status,/opt/splunkforwarder type,initd files?,Sparrow server?,Overall Status,Splunk maintain disabled?
+      insertbefore: BOF
+    delegate_to: localhost
+    run_once: yes
+    become: no
+
+### Misellaneous
+        # {% if hostvars[host].splunkd_stat is defined and hostvars[host].splunkd_stat != 'splunkd running'
+        # or hostvars[host].splunk_version is defined and hostvars[host].splunk_version != '8.0.6'
+        # or hostvars[host].splunk_home is defined and hostvars[host].splunk_home != '/opt/splunkforwarder'
+        # or hostvars[host].splunk_init_files is defined and hostvars[host].splunk_init_files|length != 0 %}
+

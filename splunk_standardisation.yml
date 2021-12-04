@@ -1,0 +1,516 @@
+- hosts: servers1
+  become: yes
+  gather_facts: yes
+  vars:
+    splunk_version_latest: '8.0.6'
+    dt: 'date +%d-%m-%Y::%H:%M:%S'
+    work_place: '/home/pa0034ut/splunk'
+    force_splunk: {"wbc": {"rhel": {"splunk": {"upgrade_options": {"force": true }}}}}
+    enable_splunk: {"wbc": {"rhel": {"splunk": {"comply": {"disable": false}, "default": {"disable": false}, "maintain": {"disable": false}}}}}
+
+  tasks:
+
+### Check whether the current Splunk is Good before do the standardization
+## Get Splunk Home
+  - name: Find splunk home using running splunkd process
+    shell: /bin/readlink /proc/$(/sbin/pidof splunkd|awk '{print $1}')/exe
+    failed_when: no
+    register: splunkd_home
+
+  - name: Get splunk home for the hosts where splunk not running currently
+    block:
+      - name: Check mlocate installed
+        command: rpm -q mlocate
+        failed_when: no
+        register: mlocate_stat
+        args:
+          warn: no
+
+      - name: Install mlocate
+        yum:
+          name: mlocate
+          state: installed
+        when: mlocate_stat.rc != 0
+        ignore_errors: yes
+
+      - name: updateDB
+        command: updatedb
+        async: 40   #Timeout for this task or use 'timeout 40s updatedb'
+        ignore_errors: yes
+
+      - name: Locate splunkd 
+        command: locate -r bin/splunkd$
+        register: splunkd_location
+        failed_when: no
+    when: splunkd_home.rc != 0
+
+  - name: Set Fact splunk HOME
+    set_fact: 
+      splunk_home: "{{ splunkd_home.stdout.split('/bin/splunkd')[0] if splunkd_home.rc == 0 
+      else splunkd_location.stdout.split('/bin/splunkd')[0] if splunkd_location.rc == 0 else ''}}"
+
+## Check Running Splunk Version
+  - name: Check Running version of Splunk
+    shell: cat /opt/splunkforwarder/etc/splunk.version|grep -i version|cut -d '=' -f2
+    register: splunk_ver
+    failed_when: no
+
+## Check SplunkForwarder.service in systemd
+  - name: Check splunk service in init scripts
+    stat:
+      path: "{{ '/etc/init.d/splunk' if ansible_distribution_major_version == '6' else 
+        '/etc/systemd/system/multi-user.target.wants/SplunkForwarder.service' if ansible_distribution_major_version == '7' }}"
+    register: splunk_service_in_systemd
+
+  - set_fact:
+      splunk_overall_stat: "{{ 'Good' if (splunkd_home.stdout == '/opt/splunkforwarder/bin/splunkd' 
+        and splunk_ver.stdout == splunk_version_latest and splunk_service_in_systemd.stat.exists) else 'Not Good'}}"
+
+## Check whether splunk maintain disabled in chef
+  - name: Read /etc/chef/host.json to check whether splunk maintain on the host disabled or not
+    slurp:
+      src: /etc/chef/host.json
+    register: chef_host
+    failed_when: no
+
+  - name: Check whether Splunk maintain disabled in /etc/chef/host.json
+    set_fact:
+      splunk_maintain_disabled_in_chef: "{{ chef_host.content|b64decode|from_json|json_query('wbc.rhel.splunk.maintain.disable') if chef_host.content is defined else ''}}"
+
+  - name: debug msg | if splunk overall status is good
+    debug:
+      msg: "{{ 'Splunk is already with Standard configuration. Skipping..' if splunk_overall_stat == 'Good' else '' }} :
+        {{ 'Splunk Maintain is disabled on system. Skipping..' if splunk_maintain_disabled_in_chef|bool else '' }}"
+    when: "splunk_overall_stat == 'Good' or splunk_maintain_disabled_in_chef|bool"
+
+  - name: Confirmation ##Not putting pause task under beloww 'Implementation block' since pause module may skipped if first host in the list is being skipped
+    pause:
+      prompt: "Are you OK to start the splunk Standardization, which would involve the below steps?\n
+      1. Stop Splunk Service\n
+      2. Move the splunk initd and systemd files to {{ work_place }}/splunk_backup\n
+      3. Unlink /etc/rc.d/*splunk files\n
+      4. Take backup of SPLUNK_HOME/etc/system/local/deploymentclient.conf and SPLUNK_HOME/etc/system/local/inputs.conf\n
+      5. Remove existing /opt/splunkforwarder\n
+      6. Set wbc.rhel.splunk.upgrade_options.force=true if /opt/splunkforwarder is file system as we dont want to remove that FS\n
+      7. Place /etc/chef/encrypted_data_bag_secret if its not exists\n
+      8. Remove splunkforwarder package as the cookbook not able to remove it on some systems\n
+      9. Run splunk cookbook: chef-client -n wbc_rhel_splunk_maintain\n
+      10. Restore deploymentclient.conf and local/inputs.conf to /opt/splunkforwarder/etc/system/local/\n
+      11. Restart SplunkForwarder.service using systemd\n
+      12. Verify the standard splunk configuration\n
+      [ENTER] to Continue, Or Ctrl+C to abort the mission"
+
+### Implementation
+  - name: Block | Standardise Splunk if its not Good
+    block:
+      - name: Write to LOG |User
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | {{ ansible_user }} Starting the standardization"
+          path: '{{ work_place }}/splunk_standardisation.log'
+          create: yes
+## Initd / systemd splunk scripts- list, take backup and remove
+      - name: List splunk scripts in init.d, rc.d
+        find:
+          paths: [/etc/rc.d, /etc/init.d, /etc/systemd/system]
+          patterns: ['S*splunk', 'K*splunk', 'splunk', 'splunkd', '[sS]plunk*.service']
+          file_type: any
+          recurse: yes
+        register: initd_splunk_files 
+
+      - name: 1 | Create a list of initd/systemd splunk scripts present in system
+        set_fact:
+          splunk_init_files: []
+
+      - name: 2 | Create a list of initd splunk scripts present in system
+        set_fact: 
+          splunk_init_files: "{{ splunk_init_files }} + [ '{{ item.path }}' ]"
+        loop: "{{ initd_splunk_files.files }}"
+
+      - name: Show initd files for splunk
+        debug:
+          msg: "{{ splunk_init_files }}"
+
+      - name: Take backup of the initd splunk files to {{ work_place }}/splunk_standardisation.log
+        copy: 
+          src: "{{ item.path }}"
+          dest: "{{ work_place }}/splunk_backup/"
+          remote_src: yes
+        register: initd_splunk_backup
+        loop: "{{ initd_splunk_files.files }}"
+        ignore_errors: yes
+        when: not item.islnk
+
+      - name: Write to LOG about initd splunk scripts backup
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | Backed up initd/systemd splunk scripts {{ splunk_init_files }} to {{ work_place }}/splunk_backup"
+          path: '{{ work_place }}/splunk_standardisation.log'
+          create: yes
+        when: initd_splunk_backup is success
+
+## Stop splunk service
+      - name: Stop splunk service
+        service: 
+          name: splunk
+          state: stopped
+          enabled: no
+        failed_when: no
+        register: splunk_service_stop
+
+      - name: Stop the splunk service from its HOME path
+        command: '{{ splunk_home }}/bin/splunk stop'
+        failed_when: no
+        register: splunk_stop_from_path
+        async: 60
+
+      - name: Verify whether splunkd Service is running
+        shell: /bin/ps -ef|grep -i splunkd|grep -v grep
+        register: verify_splunk_process
+        failed_when: no
+        
+      - name: Pause to clear the splunk process
+        pause:
+          seconds: 30
+
+      - name: Verify splunkd Service is running afterwaiting 30 seconds
+        shell: /bin/ps -ef|grep -i splunkd|grep -v grep
+        register: verify_splunk_process
+        failed_when: no
+
+      - name: Write to LOG about splunkd stop
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | Splunk Service stopped part of standardization"
+          path: '{{work_place}}/splunk_standardisation.log'
+          create: yes
+        when: 
+          - splunk_service_stop is success or splunk_stop_from_path is success 
+          - verify_splunk_process is skipped or verify_splunk_process.rc != 0
+      
+      - name: Fail if splunkd still running
+        fail:
+          msg: 'Splunk Still running, even after tried to stop'
+        when: verify_splunk_process.rc is defined and verify_splunk_process.rc == 0
+
+      - name: 1 | Remove initd splunk scripts
+        file:
+          path: "{{ item.path }}"
+          state: absent
+        loop: "{{ initd_splunk_files.files }}"
+        register: initd_splunk_removal
+
+      - name: Check Again | List splunk scripts in init.d, rc.d
+        find:
+          paths: [/etc/rc.d, /etc/init.d, /etc/systemd/system]
+          patterns: ['S*splunk', 'K*splunk', 'splunk', 'splunkd', '[sS]plunk*.service']
+          file_type: any
+          recurse: yes
+        register: initd_splunk_files
+
+      - name: 2 | Remove initd splunk script files
+        file:
+          path: "{{ item.path }}"
+          state: absent
+        loop: "{{ initd_splunk_files.files }}"
+        register: initd_splunk_removal
+
+      - name: Check Again | List splunk scripts in init.d, rc.d
+        find:
+          paths: [/etc/rc.d, /etc/init.d, /etc/systemd/system]
+          patterns: ['S*splunk', 'K*splunk', 'splunk', 'splunkd', '[sS]plunk*.service']
+          file_type: any
+          recurse: yes
+        register: initd_splunk_files
+
+      - name: Pause if still initd or systemd splunk scripts exists to allow user to manaully locate them and delete before continue 
+        pause:
+          prompt: "There are initd or systemd splunk scripts still exists. Please 'locate splunk' in initd and remove them, then 'ENTER' to Continue.."
+        when: initd_splunk_files.files|length !=0
+      
+      - name: Write to LOG about initd splunk scripts removal
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | initd splunk scripts removed."
+          path: '{{ work_place }}/splunk_standardisation.log'
+          create: yes
+        when: initd_splunk_removal is success
+
+      - name: Backup SPLUNK_HOME/etc/system/local/deploymentclient.conf and SPLUNK_HOME/etc/system/local/inputs.conf
+        copy:
+          src: "{{ item }}"
+          dest: "{{ work_place }}/splunk_backup/"
+          remote_src: yes
+          force: no
+        loop:
+          - "{{splunk_home}}/etc/system/local/deploymentclient.conf"
+          - "{{splunk_home}}/etc/system/local/inputs.conf"
+        register: config_backup
+        failed_when: no
+        when: splunk_home is defined and splunk_home != ''
+
+      - name: Write to LOG about backup of SPLUNK_HOME/etc/system/local/deploymentclient.conf and SPLUNK_HOME/etc/system/local/inputs.conf
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | Backed up etc/system/local/deploymentclient.conf and etc/system/local/inputs.conf to {{ work_place }}/splunk_backup"
+          path: '{{ work_place }}/splunk_standardisation.log'
+          create: yes
+        when: config_backup is success
+
+      - name: Write to LOG about splunk cookbook execution
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} INFO | Running chef-client -n wbc_rhel_splunk_maintain"
+          path: '{{ work_place }}/splunk_standardisation.log'
+          create: yes
+        when: config_backup is success
+
+### Check whether /opt/splunkforwarder is file system and if so force the splunk deployment
+      - name: Check if /opt/splunkforwarder is file system
+        shell: mount|grep "/opt/splunkforwarder "
+        failed_when: no
+        register: fs_stat        
+
+      - name: Remove /opt/splunkforwarder
+        file:
+          path: /opt/splunkforwarder/
+          state: absent
+        register: remove_splunkforwarder_dir
+        ignore_errors: yes ## If it is a file system this task remove only the FS contents and that okey..
+
+      - name: Install jq if its not there
+        yum:
+          name: jq
+          state: installed
+
+      - name: Check /etc/chef/host.json exists
+        stat:
+          path: /etc/chef/host.json
+        register: host_json_path
+
+      - name: Create /etc/chef/host.json if its not exists
+        copy:
+          content: '{}'
+          dest: /etc/chef/host.json
+          owner: root
+          group: root
+          mode: '0644'
+        when: not host_json_path.stat.exists
+
+      - name: Set wbc.rhel.splunk.upgrade_options.force=true if /opt/splunkforwarder is FS since we dont want to remove FS
+        block: 
+          - name: Set wbc.rhel.splunk.upgrade_options.force=true if /opt/splunkforwarder is FS since we dont want to remove FS
+            slurp:
+              src: /etc/chef/host.json
+            register: imported_json_var
+
+          - name: set splunk force deployment in host.json
+            set_fact:
+              updated_json_var_force: "{{ imported_json_var.content|b64decode|from_json | default([]) | combine(force_splunk, recursive=True) }}"
+
+          - name: Update /etc/chef/host.json with splunk force attribute
+            copy: 
+              content: "{{ updated_json_var_force | to_nice_json }}" 
+              dest: /etc/chef/host.json
+              mode: 0644
+              owner: root
+              group: root
+            register: build_update
+        when: fs_stat.rc == 0
+
+### Remove splunkforwarder package
+      - name: Remove splunkforwarder package
+        yum:
+          name: splunkforwarder*
+          state: absent
+
+      - name: Check /etc/chef/encrypted_data_bag_secret exists
+        stat: 
+          path: /etc/chef/encrypted_data_bag_secret
+        register: secret_file
+
+      - name: copy encrypted_data_bag_secret if its not exists
+        copy:
+          src: ~/encrypted_data_bag_secret
+          dest: /etc/chef/encrypted_data_bag_secret
+          owner: root
+          group: root
+          mode: '0600'
+        when: not secret_file.stat.exists
+
+## Remove splunk group if splunk user does not exist in /etc/passwd and its GID is not 60000021
+      - name: Check for splunk local user
+        command: grep 'splunk:' /etc/passwd
+        ignore_errors: yes
+        register: splunk_local_user
+
+      - name: Check for splunk local group
+        command: grep 'splunk:' /etc/group
+        ignore_errors: yes
+        register: splunk_local_group
+
+      - name: Remove splunk group if splunk user does not exist in /etc/passwd and its GID is not 60000021
+        group:
+          name: splunk
+          state: absent
+        when: 
+          - splunk_local_user is not success
+          - splunk_local_group is success
+          - "'60000021' not in splunk_local_group.stdout"
+
+      - name: 1 | Clear yum cache to avoid /var filling up
+        file:
+          path: /var/cache/yum
+          state: absent
+
+##Run chef-client to start standardisation process
+
+      - name: Run a chef-client -n maintain to make configs intact
+        command: chef-client -n maintain
+        failed_when: no
+        environment:
+          PATH: /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+
+      - name: 2 | Clear yum cache to avoid /var filling up
+        file:
+          path: /var/cache/yum
+          state: absent
+
+      - name: 1 | Run chef-client -n wbc_rhel_splunk_maintain
+        command: chef-client -n wbc_rhel_splunk_maintain
+        register: splunk_maintain_stat
+        # when: remove_splunkforwarder_dir is success or host_json_update is success
+        ignore_errors: yes
+        environment:
+          PATH: /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
+
+      - name: If splunk maintain is disabled (mostly on re-tooled servers) then enable it and run splunk maintain again
+        block:
+          - name: Slurp host.json
+            slurp:
+              src: /etc/chef/host.json
+            register: imported_json_var_2
+
+          - name: update host.json with splunk enable
+            set_fact:
+              updated_json_var_force: "{{ imported_json_var_2.content|b64decode|from_json | default([]) | combine(enable_splunk, recursive=True) }}"
+
+          - name: Update /etc/chef/host.json with splunk force attribute
+            copy: 
+              content: "{{ updated_json_var_force | to_nice_json }}" 
+              dest: /etc/chef/host.json
+              mode: 0644
+              owner: root
+              group: root
+            register: build_update
+
+          - name: 3 | Clear yum cache to avoid /var filling up
+            file:
+              path: /var/cache/yum
+              state: absent
+
+          - name: 2 | Run chef-client -n wbc_rhel_splunk_maintain
+            command: 'chef-client -n wbc_rhel_splunk_maintain'
+            register: splunk_maintain_stat_2
+            # when: remove_splunkforwarder_dir is success or host_json_update is success
+            ignore_errors: yes 
+            environment:
+              PATH: /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin             
+        when: "'skipped due to disabling' in splunk_maintain_stat.stdout"
+
+      - name: Check splunk cookbook created the file deploymentclient.conf to verify the status of job
+        stat:
+          path: '/opt/splunkforwarder/etc/system/local/deploymentclient.conf'
+        register: deployment_client
+
+      - name: Write to LOG about splunk cookbook run
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} {{'INFO | Splunk cookbook maintain successful' if deployment_client.stat.exists 
+          and (splunk_maintain_stat or splunk_maintain_stat_2) is success else 'CRITICAL | Splunk cookbook maintain run Unsuccessful. See /var/log/chef/client.log for more details ..' }}"
+          path: '{{ work_place }}/splunk_standardisation.log'
+
+      - name: Final | Clear yum cache to avoid /var filling up
+        command: yum clean all
+        ignore_errors: yes
+        async: 60
+        args:
+          warn: no
+
+      - name: Fail if chef-client -n wbc_rhel_splunk_maintain is unsuccessful
+        fail: 
+          msg: "chef-client -n wbc_rhel_splunk_maintain UNSUCCESSFUL"
+        when: not deployment_client.stat.exists or (splunk_maintain_stat is not success and splunk_maintain_stat_2 is not success)
+
+      - name: Copy the files deploymentclient.conf and inputs.conf from Backup to /opt/splunkforwarder/etc/system/local/
+        copy:
+          src: "{{ item }}"
+          dest: '/opt/splunkforwarder/etc/system/local/'
+          remote_src: yes
+          owner: splunk
+          group: splunk
+          backup: yes
+        loop:
+          - "{{work_place}}/splunk_backup/deploymentclient.conf"
+          - "{{work_place}}/splunk_backup/inputs.conf"
+        register: config_restore
+        failed_when: no
+
+      - name: Restart splunk services
+        service:
+          name: "{{ 'SplunkForwarder' if ansible_distribution_major_version == '7' 
+            else 'splunk' if ansible_distribution_major_version == '6' }}"
+          state: restarted 
+
+      - name: Write to LOG about splunk config restore status
+        lineinfile:
+          line: "{{ item }}"
+          path: '{{ work_place }}/splunk_standardisation.log'
+        loop:
+          - "{{lookup('pipe', dt)}} {{'INFO | Restored deploymentclient.conf and inputs.conf from backup to /opt/splunkforwarder/etc/system/local/' 
+          if config_restore is success else 'CRITICAL | deploymentclient.conf or inputs.conf not looks good' }}"
+          
+      ### Final verification
+      - name: Final verification | Find splunk home using running splunkd process
+        shell: /bin/readlink /proc/$(/sbin/pidof splunkd|awk '{print $1}')/exe
+        failed_when: no
+        register: splunkd_home_v
+
+      - name: Final verification | Check Running version of Splunk
+        shell: cat /opt/splunkforwarder/etc/splunk.version|grep -i version|cut -d '=' -f2
+        register: splunk_ver_v
+        failed_when: no
+
+      - name: Final verification | Check SplunkForwarder in systemd or initd
+        stat:
+          path: "{{ '/etc/init.d/splunk' if ansible_distribution_major_version == '6' else 
+            '/etc/systemd/system/multi-user.target.wants/SplunkForwarder.service' if ansible_distribution_major_version == '7' }}"
+        register: splunk_service_in_systemd_v
+
+      - name: Collect Service facts
+        service_facts:
+
+      # - name: Show the values of Final verification
+      #   debug:
+      #     var: "{{ item }}"
+      #   loop:
+      #     - splunkd_home_v.stdout
+      #     - splunk_ver_v.stdout
+      #     - ansible_facts.services['SplunkForwarder.service']['state']
+      #     - ansible_facts.services['SplunkForwarder.service']['status']
+
+      - name: Set fact | Splunk overall status after standardisation
+        set_fact:
+          splunk_overall_stat_v: "{{ 'Good' if (splunkd_home_v.stdout == '/opt/splunkforwarder/bin/splunkd' 
+            and splunk_ver_v.stdout == splunk_version_latest and splunk_service_in_systemd_v.stat.exists
+            and (ansible_facts.services['SplunkForwarder.service']['state'] == 'running' if ansible_distribution_major_version == '7' else
+            ansible_facts.services['splunk']['state'] == 'running' if ansible_distribution_major_version == '6' )
+            and (ansible_facts.services['SplunkForwarder.service']['status'] == 'enabled' if ansible_distribution_major_version == '7' else
+            ansible_facts.services['splunk']['status'] == 'enabled' if ansible_distribution_major_version == '6')) else 'Not Good'}}"
+
+      - name: Assert whether the splunk standardization successful
+        assert:
+          that: splunk_overall_stat_v == 'Good'
+          fail_msg: "Splunk Standardisation Failed"
+          success_msg: "Splunk Standardisation Successful"
+
+      - name: Write to LOG about splunk standardisation and overall splunk status
+        lineinfile:
+          line: "{{lookup('pipe', dt)}} {{'INFO | Splunk standardization is SUCCESSFUL' if splunk_overall_stat_v == 'Good' 
+          else 'CRITICAL | Splunk standardization FAILED' }}"
+          path: '{{ work_place }}/splunk_standardisation.log'
+
+    when: splunk_overall_stat != 'Good' and not splunk_maintain_disabled_in_chef|bool

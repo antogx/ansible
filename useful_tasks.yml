@@ -1,0 +1,77 @@
+
+  - name: Change Content Source
+    uri:
+      url: https://satellite.unix.srv.westpac.com.au/api/v2/hosts/9506
+      user: "{{ username }}"
+      password: "{{ pass }}"
+      body: '{"host":{"content_facet_attributes":{"content_source_id": "5"}}}'
+      body_format: json
+      force_basic_auth: yes
+      return_content: yes
+      timeout: 60
+      method: PUT
+    register: cv_s
+# curl alternative: curl -H "Content-Type:application/json" -X PUT -u 'username:pass' -k -d '{"host":{"content_facet_attributes":{"content_source_id": "2"}}}' https://satellite.unix.srv.westpac.com.au/api/v2/hosts/9506
+#####################################################################
+  - name: Check VM Property
+    vmware_guest_info:
+      hostname: vc-prod.btfin.com # rcc-vcenter-ciaas.btfin.com or wsdc-vcenter-ciaas.btfin.com or au2004zpx2100.btfin.com or au2106zpx2100.btfin.com
+      username: PAM-0034_Admin15
+      password: hbDX0|y@?PMG8F,
+      validate_certs: no    
+      name: AU2004LDC0005
+      datacenter: RCC  #Exception- RCC and WSDC, VBlock RCC- RCC-NPRD01 and RCC-PROD01, VBlock WSDC - WSDC-NPRD01 and WSDC-PROD01
+      schema: vsphere
+    delegate_to: localhost
+    register: vm_property
+
+  - debug:
+      var: vm_property.instance.guest.net
+#####################################################################
+  - name: Update network adapter
+    vmware_guest_network:
+      name: AU2004LDC0005
+      datacenter: RCC
+      hostname: vc-prod.btfin.com
+      username: PAM-0034_Admin15
+      password: hbDX0|y@?PMG8F,
+      validate_certs: no
+      # gather_network_info: false
+      networks:
+        - name: "3305-ISD-SS-10.39.226.0m28"
+          state: present
+          label: "Network adapter 1"
+          connected: false
+    delegate_to: localhost
+    register: vm_property
+
+  - debug:
+      var: vm_property
+#####################################################################
+  - vmware_guest_powerstate:
+      hostname: wsdc-vcenter-ciaas.btfin.com
+      username: CORPAU\PAM-0034_Admin15
+      password: Myw@pG2$+VufXd$
+      validate_certs: no
+      name: au2106ldi0008
+      state: powered-on
+      # use_instance_uuid: yes
+    delegate_to: localhost
+    register: power_stat
+
+  - debug:
+      var: power_stat
+#####################################################################
+  - name: Get all portgroups in dvswitch vDS
+    vmware_dvs_portgroup_find:
+      hostname: wsdc-vcenter-ciaas.btfin.com
+      username: CORPAU\PAM-0034_Admin15
+      password: C.GC2P4D>v23!vZ
+      dvswitch: WSDC-NPRD01-VM-dvs
+      validate_certs: no
+    delegate_to: localhost
+    register: portgroups_info
+
+  - debug:
+      var: portgroups_info
+#####################################################################

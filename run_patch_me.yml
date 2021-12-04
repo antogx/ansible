@@ -1,0 +1,42 @@
+- name: Run the patchme script using ansible
+  hosts: servers1
+  become: yes
+  gather_facts: false
+  tasks: 
+  - name: Enable the Satellite-tools Repo
+    rhsm_repository: 
+      name: rhel-*-server-satellite-tools-*-rpms
+      state: enabled
+
+  - name: update the ss_scripts package
+    yum:
+      name: ss_scripts
+      state: latest
+
+  - name: List /root/patching/rpms/*.rpm files
+    find:
+      paths: /root/patching/rpms
+      patterns: '*.rpm'
+    register: files_to_delete 
+
+  - name: Remove /root/patching/rpms/*.rpm files
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ files_to_delete.files }}"
+
+  # - pause:
+  #     prompt: "Enter to continue Patching"
+
+  - name: Execute patch_me script on servers
+    shell: /usr/local/script/patch_me.sh -r yes -v "Apr-21" -c maintain -p noop -w 0
+    register: patchme_result
+
+  - name: Wait for the server to come online after reboot
+    wait_for_connection:
+      connect_timeout: 20
+      sleep: 5
+      delay: 180
+      timeout: 1200
+    when: patchme_result is changed
+    

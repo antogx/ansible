@@ -1,0 +1,61 @@
+## This is mainly using for removing the local users in EPS servers
+- hosts: servers1
+  become: yes
+  gather_facts: yes
+  tasks:
+
+  - name:
+    pause:
+      prompt: "Make sure you have the file user_cleanup in the same location of playbook with hostname and usernames to delete specified as below:\n
+      lnxau2004sd0143.rcc.nsw.westpac.com.au	l090274\n
+      lnxau2004st0218	l095136\n"
+
+  - name: filter the inventory_hostname with the users to delete
+    raw: 'grep {{ inventory_hostname }} user_cleanup'
+    register: users_to_remove_r
+    delegate_to: localhost
+    become: no
+
+  - name: Show the users to delete from the user_cleanup file
+    debug:
+      msg: "{{ item.split()[1] }}"
+    loop: "{{ users_to_remove_r.stdout_lines }}"
+
+  - name: 1 | Create null list to append with user details
+    set_fact: 
+      users_to_remove: []
+
+  - name: 2 | Create a list of users to remove
+    set_fact:
+        users_to_remove: "{{ users_to_remove }} + [ '{{item.split()[1]}}' ]"
+    loop: "{{ users_to_remove_r.stdout_lines }}"
+
+  - name: Show the users to remove
+    debug: 
+      var: users_to_remove
+
+  - name: take backup of /etc/passwd file
+    copy:
+      src: '/etc/passwd'
+      dest: /home/pa0034ut/passwd_backup/
+      backup: yes
+
+  - name: Remove users
+    user:
+      name: "{{ item }}"
+      state: absent
+      remove: yes
+    loop: "{{ users_to_remove }}"
+    ignore_errors: yes
+
+  - name: Verify in /etc/passwd the users removed
+    raw: grep {{ item }} /etc/passwd
+    loop: "{{ users_to_remove }}"
+    failed_when: no
+    register: user_stat_after_remove
+    
+  - name: Fail if user still available in /etc/passwd
+    fail:
+      msg: "Users not removed correctly"
+    when: item.rc == 0
+    loop: "{{ user_stat_after_remove.results }}"

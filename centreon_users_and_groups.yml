@@ -1,0 +1,89 @@
+## Task for Users setup as per the prerequisites   
+- name: Block for users and groups
+  block:
+  - name: create apache user from ldap
+    command: /usr/local/sbin/cpldapuser -l {{ item }}
+    ignore_errors: yes
+    loop:
+      - apache
+      - mysql
+
+  - name: Create centreon group # since its not created during installation automatically as present in ldap
+    command: /usr/local/sbin/cpldapuser -l centreon -f
+    ignore_errors: yes
+
+  - name: Making sure user home, shell and groups are correct
+    user:
+      name: "{{ item.name }}"
+      home: "{{ item.home }}"
+      shell: "{{ item.shell }}"
+      create_home: yes
+      skeleton: "/etc/skel"
+      groups: "{{ item.groups }}"
+      append: yes
+    loop: "{{ users }}"
+
+  - name: Creating .bash_profile if its not exist
+    copy:
+      src: /etc/skel/.bash_profile
+      dest: "{{ item.home }}"
+      remote_src: yes
+      force: no
+      owner: "{{ item.name }}"
+      group: "{{ item.name }}"
+    loop: "{{ users }}"
+
+  - name: Set home directory ownership 
+    file:
+      path: "{{ item.home }}"
+      owner: "{{ item.name }}"
+      group: "{{ item.name }}"
+    loop: "{{ users }}" 
+
+  - name: set umask
+    lineinfile:
+      path: "{{ item.home }}/.bash_profile"
+      line: umask {{ item.umask}}
+    loop: "{{ users }}"
+
+  vars:
+    users:
+    - { name: apache, umask: '0022', home: /var/www, shell: /sbin/nologin, groups: 'centreon,apache,nagios,centreon-gorgone,centreon-broker,centreon-engine,remoteusers,localusers'}
+    - { name: centreon, umask: '0002', home: /var/spool/centreon, shell: /bin/bash, groups: 'centreon,apache,centreon-engine,centreon-gorgone,centreon-broker,remoteusers,localusers' }
+    - { name: centreon-broker, umask: '0002', home: /var/lib/centreon-broker, shell: /bin/bash, groups: 'centreon,apache,nagios,centreon-engine,centreon-gorgone,centreon-broker,remoteusers,localusers' }
+    - { name: centreon-engine, umask: '0002', home: /var/lib/centreon-engine, shell: /bin/bash, groups: 'centreon,apache,nagios,centreon-engine,centreon-gorgone,centreon-broker,remoteusers,localusers' }
+    - { name: centreon-gorgone, umask: '0002', home: /var/lib/centreon-gorgone, shell: /bin/bash, groups: 'centreon,apache,centreon-engine,centreon-gorgone,centreon-broker,remoteusers,localusers' }
+    - { name: mysql, umask: '0002', home: /var/lib/mysql, shell: /sbin/nologin, groups: 'mysql,remoteusers,localusers' }
+
+  when: "['central', 'remote', 'pollers']|intersect(group_names)"
+
+- name: Block for users creation in central_db and remote_db
+  block:
+  - name: create mysql user from ldap
+    command: /usr/local/sbin/cpldapuser -l mysql
+    ignore_errors: yes
+
+  - name: Making sure user home, shell and groups are correct
+    user:
+      name: "{{ item.name }}"
+      home: "{{ item.home }}"
+      shell: "{{ item.shell }}"
+      create_home: yes
+      skeleton: "/etc/skel"
+      groups: "{{ item.groups }}"
+      append: yes
+    loop: "{{ users }}"
+
+  - name: Set home directory ownership 
+    file:
+      path: "{{ item.home }}"
+      owner: "{{ item.name }}"
+      group: "{{ item.name }}"
+    loop: "{{ users }}" 
+
+  vars:
+    users:
+    - { name: mysql, umask: '0002', home: /var/lib/mysql, shell: /sbin/nologin, groups: 'mysql,remoteusers,localusers' }
+
+  when: "['central_db', 'remote_db']|intersect(group_names)"
+  

@@ -1,0 +1,78 @@
+- hosts: central:pollers:central_db
+  become: yes
+  gather_facts: no
+  tasks:
+##Set downtime
+  - name: Get current time
+    raw: date +'%Y-%m-%d %H:%M'
+    register: dt
+    delegate_to: localhost
+    run_once: yes
+    become: no
+
+  - name: Set current time
+    set_fact:
+      start_time: "{{ dt.stdout|trim }}"
+
+  - name: Get end hour
+    set_fact:
+      end_hr: "{{ dt.stdout.split()[1].split(':')[0]|int + 5 }}"
+
+  - set_fact: 
+      end_time: "{{ dt.stdout.split()[0] }} {{ end_hr }}:00"
+
+  - debug:
+      msg: "{{ start_time }} {{ end_time }}"
+
+  - name: Set Downtime from au2106lpi6004
+    shell: '/usr/local/script/.set_downtime.sh {{ inventory_hostname }} "{{ start_time }}" "{{ end_time }}" 1 0 {{ ansible_user }} "Setting downtime for Centreon deployment"'
+    register: set_downtime
+    become_user: centreon
+    delegate_to: au2106lpi6004
+
+  - name: Show the downtime status
+    debug:
+      var: set_downtime.stdout
+
+##Disable SELinux
+  - name: Disable SELinux
+    selinux:
+      state: disabled
+    register: sestatus
+
+  - name: Install required packages
+    yum:
+      name: mlocate
+      state: installed
+
+## Do full patching
+  - name: Do full patching
+    yum: 
+      name: "*"
+      state: latest
+    register: patch_stat
+
+## Disable Firewalld
+  - name: Disable firewalld
+    service: 
+      name: firewalld
+      state: stopped
+      enabled: no
+
+## Set umask for root temporarily
+  - name: Set umask for root. This will be reverted later
+    lineinfile:
+      path: /root/.bash_profile
+      line: umask 0022
+
+## Reboot if selinux changed or system patched
+  - pause:
+     prompt: "Confirm reboot (Only rebooted if selinux changed or systems patched?"
+
+  - name: Reboot
+    reboot:
+      msg: "Reboot Initiated part of rhel7 to 8 upgrade"
+      reboot_timeout: 600
+      post_reboot_delay: 20
+    when: sestatus is changed or patch_stat is changed
+    

@@ -1,0 +1,39 @@
+- hosts: servers1
+  become: yes
+  gather_facts: no
+  vars:
+    fs: /var
+    size_by: 2G
+  tasks:
+
+  - name: Get the LV name
+    shell: df -Ph {{fs}}|tr -s ' '|cut -d ' ' -f1|grep -v Filesystem
+    register: lv_name
+
+  - name: Get the FS Type
+    shell: df -PTh {{fs}} |tr -s ' '|cut -d ' ' -f2|grep -v Type
+    register: fstype
+
+  - debug:
+      var: lv_name.stdout
+
+  - debug:
+      var: fstype.stdout
+
+  - name: Extend lv
+    shell: /sbin/lvextend -L +{{size_by}} {{ lv_name.stdout }}
+
+  - name: Resize XFS
+    shell: /sbin/xfs_growfs {{ lv_name.stdout }}
+    when: fstype.stdout == 'xfs'
+
+  - name: Resize EXT file system
+    shell: /sbin/resize2fs {{ lv_name.stdout }}
+    when: "'ext' in fstype.stdout"
+
+  - name: Show new disk space
+    shell: df -h {{fs}}
+    register: fs_size
+
+  - debug:
+      var: fs_size.stdout_lines

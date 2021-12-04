@@ -1,0 +1,57 @@
+- hosts: servers1
+  become: yes
+  gather_facts: yes
+  tasks:
+
+  - read_csv:
+      path: ~/appd_fix_20210720_rhel.csv
+    register: csv
+    delegate_to: localhost
+    run_once: yes
+    become: no
+
+  - set_fact: 
+      application_name: "{{ item['Application Name'] }}"
+      tier_name: "{{ item['Tier Name'] }}"
+      node_name: "{{ item['Node Name'] }}"
+    loop: "{{ csv.list }}"
+    when: inventory_hostname == item['Server']
+
+  - set_fact: 
+      appd_json: '{
+                    "appdynamics": {
+                        "machineagent": {
+                            "config": {
+                                "application-name": "{{ application_name }}",
+                                "tier-name": "{{ tier_name }}",
+                                "node-name": "{{ node_name }}"
+                            }
+                        }
+                    }
+                  }'
+
+  - debug: 
+      msg: "{{ appd_json }}"
+
+  - copy: 
+      content: "{{ appd_json | to_nice_json }}" 
+      dest: /tmp/appd_attributes_INC101717646.json
+      mode: 0644
+      owner: root
+      group: root
+    register: appd_attr_creation
+  
+  - shell: chef-client -n appdynamics_machineagent_maintain -j /tmp/appd_attributes_INC101717646.json
+    register: appdynamics_maintain
+
+  - command: egrep 'application-name|tier-name|node-name' /opt/appdynamics/machineagent/conf/controller-info.xml
+    register: controller_info
+
+  - debug:
+      var: controller_info.stdout_lines
+
+  - service_facts:
+
+  - debug:
+      msg: "{{ ansible_facts.services['appdynamics-machine-agent.service']['state']  if ansible_distribution_major_version == '7' else
+            ansible_facts.services['appdynamics-machine-agent']['state'] if ansible_distribution_major_version == '6' }}"

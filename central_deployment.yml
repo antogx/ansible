@@ -1,0 +1,149 @@
+- hosts: central:central_db
+  become: yes
+  gather_facts: no
+  tasks:
+
+  - name: Enable Centreon artifactory_repo
+    include_tasks: artifactory_repo_task.yml
+
+  - name: Centreon packages installation 
+    block:       
+    - name: Enable PHP 7.3
+      command: dnf module enable php:7.3 -y
+      args:
+        warn: no
+
+    - name: list enabled module
+      command: dnf module list php
+      register: dnf_module
+      args:
+        warn: no
+
+    - debug:
+        var: dnf_module.stdout_lines
+
+    - fail:
+        msg: "PHP 7.3 is not activated"
+      when: "'7.3 [e]' not in dnf_module.stdout"
+
+    - name: Install centreon packages
+      dnf:
+        name: 
+          - centreon-base-config-centreon-engine 
+          - centreon-widget*
+          - mod_ssl 
+          - mod_security 
+          - openssl
+        state: installed
+        enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
+        rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: Set the PHP time zone
+      lineinfile:
+        path: /etc/php.d/50-centreon.ini
+        line: "date.timezone = Australia/Sydney"
+
+    - name: User and groups setup
+      include_tasks: users_and_groups.yml
+
+    - name: Copy the custom nrpe scripts to Server
+      copy:
+        src: nrpe_scripts/check_centreon_master
+        dest: /usr/lib64/nagios/plugins/
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Copy the nrpe cfg file
+      copy:
+        src: nrpe_cfg/check_centreon_master.cfg
+        dest: /etc/nrpe.d/
+        owner: root
+        group: root
+        mode: 0755
+      register: cfg_task
+
+    - name: Restart nrpe if cfg was changed
+      systemd:
+        name: nrpe
+        state: restarted
+      when: cfg_task.changed
+
+  ## Services
+    - name: Enable the services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+      loop: [php-fpm, httpd, centreon, cbd, centengine, gorgoned]
+
+    - name: start httpd and php
+      service:
+        name: "{{item}}"
+        state: restarted
+      loop: 
+        - php-fpm
+        - httpd
+    when: "'central' in  group_names" 
+
+## DB installation
+  - name: DB installation on db servers
+    block:
+
+    - name: User and groups setup
+      include_tasks: users_and_groups.yml
+
+    - name: Install centreon-database on dedicated DB servers
+      dnf:
+        name: centreon-database
+        state: installed
+        enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
+        rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: deamon-reload
+      systemd:
+        daemon_reload: yes
+
+    - name: restart mariadb
+      service: 
+        name: mariadb
+        state: restarted
+        enabled: yes
+
+    - name: Creating .bash_profile if its not exist
+      copy:
+        src: /etc/skel/.bash_profile
+        dest: /var/lib/mysql/.bash_profile
+        remote_src: yes
+        force: no
+        owner: mysql
+        group: mysql
+
+    - name: set umask
+      lineinfile:
+        path: /var/lib/mysql/.bash_profile
+        line: umask 0002
+
+    - name: Copy the custom nrpe scripts to Server
+      copy:
+        src: nrpe_scripts/check_centreon_database
+        dest: /usr/lib64/nagios/plugins/
+        owner: root
+        group: root
+        mode: 0755
+
+    - name: Copy the nrpe cfg file
+      copy:
+        src: nrpe_cfg/check_centreon_database.cfg
+        dest: /etc/nrpe.d/
+        owner: root
+        group: root
+        mode: 0755
+      register: cfg_task
+
+    - name: Restart nrpe if cfg was changed
+      systemd:
+        name: nrpe
+        state: restarted
+      when: cfg_task.changed
+
+    when: "'central_db' in  group_names" 

@@ -1,0 +1,171 @@
+- name: Renew the SSL certificates for LDAP servers
+  hosts: servers1
+  become: true
+  gather_facts: false
+  vars_prompt:
+    name: key_pass
+    prompt: "Enter the password for the private key"
+
+  tasks:
+  - name: check the ssl cert expiry date from Control node
+    shell: nmap --script ssl-cert -Pn {{ inventory_hostname }}|grep -i after
+    register: cert_expiry
+    delegate_to: localhost
+    become: no
+    ignore_errors: true
+
+  - name: Show the ssl cert expiry date from Control node
+    debug:
+      msg: "{{cert_expiry.stdout if cert_expiry is success else '###################### CANNOT see the Certificate Expiry date of server from Control node!!'}}"
+  
+  - name: Stat Certificate File name 
+    find:
+      path: /etc/pki/tls/certs
+      patterns: "ldap*"
+      file_type: link
+      follow: yes
+    register: cert_files
+
+  - name: Set the Certificate file
+    set_fact:
+      cert_file_l: "{{ cert_files|json_query('files[0].path') }}"
+    when: cert_files|json_query('files[*].path')|length == 1
+
+  - name: Fail if not able to get the correct Cert file
+    fail:
+      msg: "There are multiple symlinks with name ldap*, unable to identify the right ldap certificate!"
+    when: cert_files|json_query('files[*].path')|length != 1
+
+  - name: Get the Certificate Source file
+    stat:
+      path: "{{ cert_file_l }}"
+    register: cert_file_r
+
+  - name: Set the Certificate file
+    set_fact:
+      cert_file: "{{ cert_file_r.stat.lnk_source }}"
+
+  - name: Show the Certificate file 
+    debug: 
+      msg: "Certificate file is : {{cert_file}}"
+
+  - name: Stat Key File name 
+    find:
+      path: /etc/pki/tls/private
+      patterns: "ldap*"
+      file_type: link
+      follow: yes
+    register: key_files
+
+  - name: Set the key file
+    set_fact:
+      key_file_l: "{{ key_files|json_query('files[0].path') }}"
+    when: key_files|json_query('files[*].path')|length == 1
+
+  - name: show if not able to find the key file
+    debug:
+      msg: "There are multiple symlinks with name ldap*, unable to identify the right ldap Key file!"
+    when: key_files|json_query('files[*].path')|length != 1
+
+  - name: Get the key Source file
+    stat:
+      path: "{{ key_file_l }}"
+    register: key_file_r
+
+  - name: Set the key file
+    set_fact:
+      key_file: "{{ key_file_r.stat.lnk_source }}"
+
+  - name: Show the Key file 
+    debug: 
+      msg: "Key file is : {{key_file}}"
+
+  - name: Check Certificate expiry date
+    shell: openssl x509 -enddate -noout -in {{cert_file}}
+    register: old_cert_validity
+
+  - name: Show the current certificate expiry date
+    debug:
+      msg: "{{cert_file}} : {{old_cert_validity.stdout}}"
+
+  - name: Pause and verify the current certificate name and expiry date
+    pause:
+      prompt: "Check the 'current certificate name : expiry date' and 'Enter' for continue to renew the Certificate"
+
+  - name: Verify the pem file copied from Cert manager to koguxavp010:~/sslcerts
+    command: ls ~/sslcerts/{{inventory_hostname}}.pem
+    register: sslcert_r
+    delegate_to: localhost
+    become: no
+    ignore_errors: true
+
+  - name: Fail if pem file not found at koguxavp010:~/sslcerts
+    fail:
+      msg: "{{inventory_hostname}}.pem is not at koguxavp010:~/sslcerts"
+    when: sslcert_r is failed
+
+  - name: Copy the pem file to remote host at /tmp
+    copy:
+      src: ~/sslcerts/{{inventory_hostname}}.pem
+      dest: /tmp/
+
+  - name: Extract Cert on remote host
+    shell: openssl x509 -in /tmp/{{inventory_hostname}}.pem -pubkey -out /tmp/{{cert_file|basename}}
+
+  - name: Extract key on remote host
+    shell: openssl rsa -in /tmp/{{inventory_hostname}}.pem -out /tmp/{{key_file|basename}} -passin 'pass:{{ key_pass }}'
+
+  - name: Copy temp key file to {{key_file}}
+    copy:
+      src: /tmp/{{key_file|basename}}
+      dest: "{{key_file}}"
+      remote_src: true
+      backup: true
+
+  - name: Copy temp Certificate file to {{cert_file}}
+    copy:
+      src: /tmp/{{cert_file|basename}}
+      dest: "{{cert_file}}"
+      remote_src: true
+      backup: true
+
+  - name: Verify the renewed Certificate expiry date
+    shell: openssl x509 -enddate -noout -in {{cert_file}}
+    register: new_cert_validity
+
+  - name: Show the New certificate expiry date
+    debug:
+      msg: "{{cert_file}} : {{new_cert_validity.stdout}}"
+
+  - name: Restart sshd, slapd, and sssd to take effect of the renewed certificate
+    service:
+      name: "{{ item }}"
+      state: restarted
+    ignore_errors: true
+    loop:
+      - sshd
+      - slapd
+      - sssd
+
+  - name: check the ssl cert expiry date from Control node
+    shell: nmap --script ssl-cert -Pn {{ inventory_hostname }}|grep -i after
+    register: cert_expiry
+    delegate_to: localhost
+    become: no
+    ignore_errors: true
+    
+  - name: Show the Certificate expiry date from the Control node
+    debug:
+      msg: "{{cert_expiry.stdout if cert_expiry is success else '################ CANNOT see the Certificate Expiry date from Control node!!!!'}}"
+      
+  - name: Confirm marking the pem file at koguxavp010:~/sslcerts as COMPLETED
+    pause:
+      prompt: "Do you want to mark the pem file at koguxavp010:~/sslcerts as COMPLETED"
+
+  - name: Mark the pem file at koguxavp010:~/sslcerts as COMPLETED
+    command: mv ~/sslcerts/{{inventory_hostname}}.pem ~/sslcerts/{{inventory_hostname}}.pem_COMPLETED
+    delegate_to: localhost
+    become: no
+
+
+#openssl_certificate_info requires Python Librarires cryptography or PyOpenSSL

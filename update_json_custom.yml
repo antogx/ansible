@@ -1,0 +1,65 @@
+- name: Update custom attributes in build.json
+  hosts: servers1
+  become: yes
+  gather_facts: false
+  vars: 
+    json_file: /tmp/host.json
+    json_string: 
+      # { 
+      #   "appdynamics": {
+      #       "machineagent": {
+      #         "default": {
+      #           "disable": false
+      #         },
+      #         "maintain": {
+      #           "disable": false
+      #         }
+      #       }
+      #     }
+      # }
+  tasks:
+  - name: Check json_file exists
+    stat: 
+      path: "{{ json_file }}"
+    register: build_json_stat
+
+  - fail:
+      msg: "{{ json_file }} file not exists"
+    when: not build_json_stat.stat.exists 
+
+  - name: Take backup of build.json
+    copy: 
+      src: "{{ json_file }}"
+      dest: /var/build/build_orig.json
+      backup: true
+      remote_src: true
+
+  - name: Load var from "{{ json_file }}"
+    slurp:
+      src: "{{ json_file }}"
+    register: imported_json_var
+
+  - name: Confirm to go ahead
+    pause: 
+
+  - name: append imported_var
+    set_fact:
+      updated_json_var: "{{ imported_json_var.content|b64decode|from_json | default([]) | combine(json_string, recursive=True) }}"
+
+  - name: "Update {{ json_file }}"
+    copy: 
+      content: "{{ updated_json_var | to_nice_json }}" 
+      dest: "{{ json_file }}"
+      mode: 0644
+      owner: root
+      group: root
+    register: build_update
+
+  - name: Load var from "{{ json_file }}" for verification
+    slurp:
+      src: "{{ json_file }}"
+    register: build_value_r
+
+  - name: Show the content of build.json after the update
+    debug: 
+      msg: "{{ build_value_r.content|b64decode|from_json }}"

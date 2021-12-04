@@ -1,0 +1,18 @@
+ - name: Create centreon artifactory repositories - rhel8_centreon_stable_noarch
+    yum_repository:
+      name: rhel8_centreon_stable_noarch
+      description: rhel8_centreon_stable_noarch
+      file: rhel8_centreon_artifactory
+      baseurl: https://artifactory.srv.westpac.com.au/artifactory/rhel8_centreon/noarch/
+      gpgcheck: no
+      enabled: yes
+
+  - name: Create centreon artifactory repositories - rhel8_centreon_stable
+    yum_repository:
+      name: rhel8_centreon_stable
+      description: rhel8_centreon_stable
+      file: rhel8_centreon_artifactory
+      baseurl: https://artifactory.srv.westpac.com.au/artifactory/rhel8_centreon/$basearch/
+      gpgcheck: no
+      enabled: yes
+      

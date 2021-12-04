@@ -1,0 +1,21 @@
+- hosts: servers1
+  become: yes
+  gather_facts: yes
+  vars:
+  tasks:
+## Check chef_status
+  - name: Check /etc/chef/client.rb exists
+    stat:
+      path: /etc/chef/client.rb
+    register: chef_client
+
+  - name: Check Chef-client in systemd or initd
+    stat:
+      path: "{{ '/etc/init.d/chef-client' if ansible_distribution_major_version == '6' else 
+        '/etc/systemd/system/multi-user.target.wants/chef-client.service' if ansible_distribution_major_version == '7' }}"
+    register: chef_service_in_systemd
+
+  - name: Verify server in chef
+    debug:
+      msg: "Server is already in Chef"
+    when: chef_client.stat.exists and chef_service_in_systemd.stat.exists

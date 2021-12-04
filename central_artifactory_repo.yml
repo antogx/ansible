@@ -1,0 +1,5 @@
+- hosts: central:remote:pollers:central_db:remote_db
+  become: yes
+  gather_facts: no
+  tasks:
+  - include_tasks: artifactory_repo_task.yml

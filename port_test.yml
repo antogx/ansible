@@ -1,0 +1,44 @@
+- hosts: servers1
+  become: yes
+  become_method: sudo
+  gather_facts: true
+  tasks:
+  - name: Check the ports are opened for 2106
+    wait_for:
+      host: capsule-au2106.unix.srv.westpac.com.au
+      port: "{{ item }}"
+      delay: 2
+      timeout: 2
+    with_items: [80, 443, 5647, 8000, 8140, 8443, 9090]
+    when: 
+      - "'au2004' not in inventory_hostname"
+      - "'ln2437' not in inventory_hostname"
+      - "'ln243c' not in inventory_hostname"
+    register: port_status
+
+  - name: Check the ports are opened for au2004
+    wait_for:
+      host: capsule-au2004.unix.srv.westpac.com.au
+      port: "{{ item }}"
+      timeout: 2
+    with_items: [80, 443, 5647, 8000, 8140, 8443, 9090]
+    when: "'au2004' in inventory_hostname"
+    register: port_status
+
+  - name: Check the ports are opened for ln2437
+    wait_for:
+      host: capsule-ln2437.unix.srv.westpac.com.au
+      port: "{{ item }}"
+      timeout: 2
+    with_items: [80, 443, 5647, 8000, 8140, 8443, 9090]
+    when: "'ln2437' in inventory_hostname"
+    register: port_status
+
+  - name: Check the ports are opened for ln243c
+    wait_for:
+      host: capsule-ln243c.unix.srv.westpac.com.au
+      port: "{{ item }}"
+      timeout: 2
+    with_items: [80, 443, 5647, 8000, 8140, 8443, 9090]
+    when: "'ln243c' in inventory_hostname"
+    register: port_status

@@ -1,0 +1,232 @@
+# - name: Find splunk home using running splunkd process
+  #   shell: /bin/readlink /proc/$(/sbin/pidof splunkd|awk '{print $1}')/exe
+  #   failed_when: no
+  #   register: splunkd_home
+ 
+  # - debug:
+  #     var: splunkd_home.stdout
+## =========================================================
+  # - shell: df -h /opt/splunkforwarder
+  #   register: df
+
+  # - debug:
+  #     var: df.stdout
+## regex_replace============================================
+
+  # - debug:
+  #     msg: 'kpatch-patch-{{ ansible_facts["kernel"]|regex_replace(".el7.x86_64", "")|regex_replace("\.", "_") }}'
+  #   delegate_to: localhost
+
+  # - debug:
+  #     var: ansible_facts["kernel"]
+## Update thresholds========================================
+  # - command: grep command /etc/nrpe.d/check_swap.cfg
+  #   register: swap
+
+  # - debug:
+  #     var: swap.stdout
+
+  # # - lineinfile:
+  # #     path: /etc/nrpe.d/check_swap.cfg
+  # #     regexp: '^command[check_swap]*'
+  # #     line: "command[check_swap]=/usr/lib64/nagios/plugins/check_swap -w 80% -c 60% --no-swap OK"
+  # #     backup: yes
+
+  # - lineinfile:
+  #     path: /etc/nrpe.d/check_swap.cfg
+  #     regexp: "# Chef managed*"
+  #     state: absent
+  #     backup: yes
+
+  # - service:
+  #     name: nrpe
+  #     state: restarted
+
+  # - command: cat /etc/nrpe.d/check_swap.cfg
+  #   register: swap_new
+
+  # - debug:
+  #     var: swap_new.stdout
+## Set downtime==============================================
+  # - name: Get current time
+  #   raw: date +'%Y-%m-%d %H:%M'
+  #   register: dt
+  #   delegate_to: localhost
+  #   run_once: yes
+  #   become: no
+
+  # - name: Set current time
+  #   set_fact:
+  #     start_time: "{{ dt.stdout|trim }}"
+
+  # - name: Get end hour
+  #   set_fact:
+  #     fututre_hr: "{{ dt.stdout.split()[1].split(':')[0]|int + 5 }}"
+
+  # - set_fact:
+  #     end_time: "{{ dt.stdout.split()[0] }} {{ fututre_hr }}:00"
+
+  # - debug:
+  #     msg: "{{ start_time }} {{ end_time }}"
+
+  # - name: Set Downtime from au2106lpi6004
+  #   shell: '/usr/local/script/.set_downtime.sh {{ inventory_hostname }} "{{ start_time }}" "{{ end_time }}" 1 0 {{ ansible_user }} "Setting downtime for P2 inc remediation"'
+  #   register: set_downtime
+  #   become_user: centreon
+  #   delegate_to: au2106lpi6004
+
+  # - name: Show the downtime status
+  #   debug:
+  #     var: set_downtime.stdout
+##Patching rollback==============================================
+  # - name: get patch_id
+  #   raw: yum history|grep "2021-07"|grep "E, I, U"
+  #   register: patchid
+ 
+  # - debug:
+  #     var: patchid.stdout
+
+  # - set_fact:
+  #     patch_id: "{{ patchid.stdout.split('|')[0]|trim }}"
+
+  # - pause:
+
+  # - name: Undo patching
+  #   shell: yum history -y undo {{ patch_id }}
+
+  # - name: get previous kernel id
+  #   shell: awk -F\' /^menuentry/{print\$2} /etc/grub2.cfg|grep -Fn 3.10.0-1160.25.1.el7.x86_64
+  #   register: kernel_number
+
+  # - name: set previous kernel number
+  #   set_fact:
+  #     kernel_num: "{{ kernel_number.stdout.split(':')[0]|int - 1 }}"
+
+  # - debug:
+  #     var: kernel_num
+
+  # - name: Set to previous kernel
+  #   shell: "grub2-set-default {{ kernel_num }}"
+
+  # - name: verify
+  #   shell: cat /boot/grub2/grubenv |grep saved
+  #   register: grub_default
+
+  # - debug:
+  #     var: grub_default.stdout
+
+  # - name: Get yum history after roll back
+  #   shell: yum history|grep "2021-08"
+  #   register: yum_hist
+
+  # - debug:
+  #     var: yum_hist.stdout
+##================================================================
+  # - raw: lscpu|grep -i cpu
+  #   register: command1
+
+  # - debug:
+  #     var: command1.stdout_lines
+    # - ping:
+
+  # - command: grep wbg.appID /var/chef/attributes/attrs_normal.json
+  #   register: command
+
+  # - debug:
+  #     var: command.stdout_lines
+##APPD============================================================
+  # - service_facts:
+  # - debug:
+  #     msg: "{{ ansible_facts.services['appdynamics-machine-agent.service']['state']  if ansible_distribution_major_version == '7' else
+
+  #           ansible_facts.services['appdynamics-machine-agent']['state'] if ansible_distribution_major_version == '6' }}"
+##NFS issue ======================================================
+  # - raw: cat /var/log/messages|grep -i nfs|grep "not responding"|tail -20
+  #   register: timedout
+
+  # - debug:
+  #     var: timedout.stdout_lines|trim
+
+  # - raw: nc -zv -w1 {{ item }} 2049
+  #   register: nc
+  #   loop:
+  #     - 192.168.233.126
+  #     - 192.168.233.158
+  #     - 192.168.233.94
+
+  # - debug:
+  #     var: nc.stdout_lines
+
+  # - raw: cat /etc/fstab|grep -i nfs|cut -d ":" -f 1
+  #   register: fstab
+
+  # - debug:
+  #     var: fstab.stdout_lines|unique|list
+  # - raw: route|grep default
+  #   register: route_default
+
+  # - debug:
+  #     var: route_default.stdout_lines
+
+  # - raw: df -PhT|grep nfs
+  #   register: df_nfs
+
+  # - debug:
+  #     var: df_nfs.stdout_lines
+##======================================================
+  # - raw: ls /etc/chef/client.rb
+  #   register: chef_stat
+
+  # - debug:
+  #     var: chef_stat.stdout
+##======================================================
+  # - name: Remove deploymentclient.conf
+  #   raw: mv /opt/splunkforwarder/etc/system/local/deploymentclient.conf /opt/splunkforwarder/etc/system/local/_deploymentclient.conf_backup_
+  #   ignore_errors: yes
+
+  # - name: Run Splunk maintain
+  #   command: chef-client -n wbc_rhel_splunk_maintain -j /var/build/build.json
+
+  # - setup:
+
+  # - service:
+  #     name: "{{ 'SplunkForwarder' if ansible_distribution_major_version == '7'
+  #           else 'splunk' if ansible_distribution_major_version == '6' }}"
+  #     state: restarted
+
+  # - service_facts:
+
+  # - debug:
+  #     msg: "{{ ansible_facts.services['SplunkForwarder.service']['state']  if ansible_distribution_major_version == '7' else
+  #           ansible_facts.services['splunk']['state'] if ansible_distribution_major_version == '6' }}"
+  #   ignore_errors: yes
+
+  # - command: grep clientName /opt/splunkforwarder/etc/system/local/deploymentclient.conf
+  #   register: deploymentclient
+  # - debug:
+  #     var: deploymentclient.stdout
+
+  # - command: jq '.app_id' /var/build/build.json
+  #   register: app_id
+  # - debug:
+  #     var: app_id.stdout
+##======================================================
+  # - name: Restart gmond service.
+  #   ##  Find gmond host by cat /etc/ganglia/gmond.conf |grep host
+  #   service:
+  #     name: gmond
+  #     state: restarted
+##======================================================
+  #####Check wbc.rhel.splunk.maintain.disable
+  # - name: Read /etc/chef/host.json to check whether splunk maintain on the host disabled or not
+  #   slurp:
+  #     src: /etc/chef/host.json
+  #   register: chef_host
+  #   failed_when: no
+
+  # - name: Check whether Splunk maintain disabled in /etc/chef/host.json
+  #   set_fact:
+  #     splunk_maintain_disabled_in_chef: "{{ chef_host.content|b64decode|from_json|json_query('wbc.rhel.splunk.maintain.disable') if chef_host.content is defined else ''}}"
+  # - debug:
+  #     var: splunk_maintain_disabled_in_chef
+##======================================================

@@ -1,0 +1,22 @@
+- hosts: servers1
+  become: yes
+  gather_facts: no
+  vars: 
+    app_id: "a008dd"
+  tasks:
+  - name: Update app_id using jq
+    shell: |
+      a={{app_id}} 
+      f=/var/build/build.json 
+      o=`jq --arg ts $a '.app_id=$ts | .allVMProperties."wbg.appID"=$ts' -S $f` && /usr/local/bin/buf $f && echo "$o" > $f
+
+  - name: Perform a chef run to save to value to the node attributes on CHEF server
+    shell: chef-client -n comply -j /var/build/build.json
+
+  - name: Verify the app_id updated on all servers
+    shell: grep -i app_id /var/build/build.json
+    register: app_id_stat
+
+  - name: Display app_id entry in /var/build/build.json
+    debug: 
+      msg: "{{ app_id_stat.stdout }}"

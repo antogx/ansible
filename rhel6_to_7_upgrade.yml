@@ -1,0 +1,400 @@
+ - name: rhel6to7upgrade
+  hosts: servers1
+  become: yes
+  gather_facts: yes
+  vars: 
+    temp_admin_user: 'el7upg'
+    buildjson: '/var/build/build.json'
+    app_ids: ## Provide in a format hostname: app_id example: 
+      au20a9lsa0040 : A002F5
+
+  tasks:
+  - name: Skip and Fail if the server is not rhel6
+    fail:
+      msg: "Cannot upgrade: Current version is : rhel {{ ansible_distribution_version }}"
+    when: ansible_distribution_major_version != "6"
+
+### Fail if /usr is a file system
+  - name: Check if /usr is file system
+    command: mountpoint -q /usr
+    failed_when: no
+    register: usr_fs_stat
+
+  - name: Fail if /usr is a file system
+    fail:
+      msg: "/usr is a file system. Please make it as a directory before rhel6 to 7 upgrade "
+    when: usr_fs_stat.rc == 0
+
+  - name: Confirm the snapshot image taken
+    pause:
+      prompt: "Please proceed only after you taken the snapshot image of the server(s)..\n
+      Use vm_take_snapshot.yml playbook to take snapshot if required.."
+
+  - name: Get root password handy
+    pause:
+      prompt: "Get root password handy..\n
+      Reset root password if required .. "
+
+## Get Existing Host collection
+  - name: Get existing host collection
+    shell: satellite-lookup au20a9lsa0040|grep Host_Collections
+    register: hc
+    delegate_to: localhost
+    become: no
+
+  - name: Show the host collection
+    debug:
+      msg: "{{ inventory_hostname.split('.')[0] }} : {{ hc.stdout }}"
+
+  - name: Pause to note down the host collection
+    pause:
+      prompt: Resume once you note down the host collection
+
+## Set downtime for the servers going to upgrade
+  - name: Get current time
+    raw: date +'%Y-%m-%d %H:%M'
+    register: dt
+    delegate_to: localhost
+    run_once: yes
+    become: no
+
+  - name: Get current time
+    set_fact:
+      start_time: "{{ dt.stdout|trim }}"
+
+  - name: Get end hour
+    set_fact:
+      fututre_hr: "{{ dt.stdout.split()[1].split(':')[0]|int + 5 }}"
+
+  - set_fact: 
+      end_time: "{{ dt.stdout.split()[0] }} {{ fututre_hr }}:00"
+  
+  - debug:
+      msg: "{{ start_time }} {{ end_time }}"
+
+  - name: Set Downtime from au2106lpi6004
+    shell: '/usr/local/script/.set_downtime.sh {{ inventory_hostname }} "{{ start_time }}" "{{ end_time }}" 1 0 {{ ansible_user }} "rhel6to7 upgrade"'
+    register: set_downtime
+    become_user: centreon
+    delegate_to: au2106lpi6004
+
+  - name: Show the downtime status
+    debug:
+      var: set_downtime.stdout
+
+  - name: Fail if setting downtime failed
+    fail:
+      msg: "Setting Downtime failed"
+    when: set_downtime is failed
+
+## Set APP ID
+  - name: Set app_id
+    set_fact: 
+      APPID: "{{ item.value }}"
+    when: inventory_hostname == item.key
+    loop: "{{ app_ids|dict2items }}"
+
+  - name: show app_id
+    debug:
+      msg: "app_id is {{ APPID }}"
+
+  - name: Make sure jq installed
+    yum:
+      name: jq
+      state: installed
+
+  - name: Take backup of build.json
+    copy: 
+      src: '{{ buildjson }}'
+      dest: '{{ buildjson }}_rhel6to7_upgrade'
+      backup: true
+      remote_src: true
+
+  - name: Slurp build.json
+    slurp:
+      src: "{{ buildjson }}"
+    register: imported_build_json
+
+  - name: set_fact build.json with app_id
+    set_fact:
+      updated_json_var_force: "{{ imported_build_json.content|b64decode|from_json | default([]) | combine( { 'app_id': APPID }, recursive=True) }}"
+
+  - name: Update build.json with app_id
+    copy: 
+      content: "{{ updated_json_var_force | to_nice_json }}" 
+      dest: /var/build/build.json
+      mode: 0644
+      owner: root
+      group: root
+    register: build_update
+
+## Create local user el7upg
+  - name: Create User el7upg
+    user:
+      name: "{{ temp_admin_user }}"
+      group: 'remoteusers'
+      password: "{{ 'Welcome12#$' | password_hash('sha512') }}"
+
+  - name: Update sudoers file for el7upg
+    copy:
+      content: "{{ temp_admin_user }} ALL=(ALL) ALL"
+      dest: '/etc/sudoers.d/{{ temp_admin_user }}'
+
+## Remove unnecessary files
+  - name: Remove unnecessary files
+    file:
+      path: "{{ item }}"
+      state: absent
+    loop:
+      - /etc/cron.daily/sudoers
+      - /etc/cron.daily/access 
+      - /etc/cron.daily/dr_info  
+      - /etc/cron.daily/motd 
+      - /etc/cron.daily/mv_old_home_dir 
+      - /etc/cron.daily/rootpw 
+      - /etc/cron.daily/yum_repo_disable
+
+## Do full patching and reboot
+  - name: Do full patching
+    yum: 
+      name: "*"
+      state: latest
+
+  - name: Reboot after the patching
+    reboot:
+      msg: "Reboot Initiated part of rhel6 to 7 upgrade"
+      reboot_timeout: 1800
+      post_reboot_delay: 30
+
+## Install upgrade assistant
+
+  - name: Enable the rhel-6-server-extras-rpms Repo
+    rhsm_repository: 
+      name: "{{ item }}"
+      state: enabled
+    loop:
+      - 'rhel-6-server-extras-rpms'
+      - 'rhel-6-server-optional-rpms'
+
+  - name: Yum clean
+    command: yum clean all
+    args:
+      warn: no 
+
+  - name: Install upgrade assistant
+    yum:
+      name: 
+        - preupgrade-assistant 
+        - preupgrade-assistant-ui 
+        - preupgrade-assistant-el6toel7 
+        - redhat-upgrade-tool
+      state: present
+
+## Remove SELinux module - sandbox
+  - name: Remove SELinux module - sandbox
+    command: semodule -r sandbox
+
+## Run the pre-upgrade checks
+  - name: Run the pre upgrade checks
+    command: preupg --force
+    register: preupg
+    ignore_errors: yes
+
+  - debug:
+      var: preupg.stdout
+
+## Copy the report somewhere you can view in a browser
+  - name: Copy the report somewhere you can view in a browser
+    fetch:
+      src: /root/preupgrade/result.html
+      dest: "~/rhel6to7upgrade/{{inventory_hostname.split('.')[0]}}_preupgrade_result.html"
+      flat: yes
+
+  - name: Pause to Review pre-upgrade report
+    pause:
+      prompt: Paused to Review pre-upgrade report
+
+# remove legacy interface names
+  - name: remove legacy interface names
+    raw: sed -i '/DEVICE/d' /etc/sysconfig/network-scripts/ifcfg-*  ## sed is idempotent
+
+## Run upgrade
+  - name: Run upgrade
+    raw: redhat-upgrade-tool --network 7.9 --instrepo https://artifactory.srv.westpac.com.au/artifactory/A00841_RHCP/kickstart/rhel7.9/ --cleanup-post --force
+    register: upgrade
+    ignore_errors: yes
+
+  - debug:
+      var: upgrade.stdout
+
+  - debug:
+      msg: "Upgrade script ran successfully. Proceed with reboot.."
+    when: 
+      - upgrade is success
+      - "'Finished. Reboot to start upgrade' in upgrade.stdout"
+
+  - fail: 
+      msg: "Some error: Analyse the upgrade logs"
+    when: "upgrade is failed or not 'Finished. Reboot to start upgrade' in upgrade.stdout"
+
+
+  - name: Pause to confirm reboot
+    pause:
+      prompt: "Enter to continue with reboot.."
+
+  - name: Reboot after the upgrade
+    reboot:
+      msg: "Reboot Initiated part of rhel6 to 7 upgrade"
+      reboot_timeout: 1800
+      post_reboot_delay: 30
+
+## Post upgrade
+
+  - name: Get new facts after upgrade
+    setup:
+
+  - name: Show distribution and version after upgrade
+    debug:
+      msg: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+  - name: Pause to verify the upgraded OS version
+    pause:
+      prompt: "See the OS version and continue all good.."
+  
+##Check for (and remove) any remaining el6 RPMs
+  - name: Collect | any leftover rhel6 packages
+    shell: rpm -qa|grep el6
+    register: el6_rpms
+    args:
+      warn: no
+
+  - name: Show | any leftover rhel6 packages
+    debug:
+      var: el6_rpms.stdout_lines
+
+  - name: Remove any leftover rhel6 packages
+    yum:
+      name: "{{ item }}"
+      state: absent
+    loop: "{{ el6_rpms.stdout_lines }}"
+
+##Create /etc/chef/encrypted_data_bag_secret
+  - name: copy encrypted_data_bag_secret if its not exists
+    copy:
+      src: ~/encrypted_data_bag_secret
+      dest: /etc/chef/encrypted_data_bag_secret
+      owner: root
+      group: root
+      mode: '0600'
+
+##Update CHEF configuration and register
+  - name: Install oniguruma, jq and chef-client from artifactory
+    yum:
+      name: 
+        - https://artifactory.srv.westpac.com.au/artifactory/A00841_RHCP/one_soe/software/jq/oniguruma-5.9.5-3.el7.x86_64.rpm 
+        - https://artifactory.srv.westpac.com.au/artifactory/A00841_RHCP/one_soe/software/jq/jq-1.5-1.el7.x86_64.rpm 
+        - https://artifactory.srv.westpac.com.au/artifactory/A00841_RHCP/one_soe/software/chef_client/chef-15.8.23-1.el7.x86_64.rpm
+      state: present
+
+  - name: Update host.json
+    shell: /usr/local/sbin/update_json.sh  -f /etc/chef/host.json --value '.migration."6to7"=true' --set
+
+  - name: Get Site name
+    shell: jq .Site {{buildjson}} -r
+    register: site
+
+  - name: Show Site
+    debug:
+      var: site.stdout
+
+  - name: Fail if site is not WSDC or RCC.
+    fail:
+      msg: "Site is not WSDC or RCC"
+    when: site.stdout|lower != 'rcc' and site.stdout|lower != 'wsdc'
+
+  - name: Update policy_name in build.json
+    shell: /usr/local/sbin/update_json.sh -f {{ buildjson }} --value '.policy_name="a00841_rhel_obm_{{ site.stdout|lower }}-isd"' --set
+    when: site.stdout|lower == 'rcc' or site.stdout|lower == 'wsdc'
+
+  - name: Run wbc_rhel_chefclient_maintain
+    shell: chef-client -n wbc_rhel_chefclient_maintain -j {{buildjson}}
+
+## Re-register to Satellite
+  - name: Unregister from Satellite
+    redhat_subscription:
+      state: absent
+
+  - name: Yum remove katello-ca-consumer cert
+    yum:
+      name: katello-ca-consumer-capsule*
+      state: absent
+
+  - name: Run Satellite build cookbook
+    shell: chef-client -n wbc_rhel_satellite_build ## check whether require -j {{buildjson}}
+    register: satellite_cookbook
+
+##Update host collection manually
+  - name: Manually update the host collection
+    pause:
+      prompt: Manually update the host collection
+
+  - name: Validate the boot disk
+    pause: 
+      prompt: |
+        "Validate LV vg_os/lv_root\n
+        Validate LV vg_os/lv_swap\n
+        Boot disk /dev/sda"
+
+## Upgrade to grub2
+  - name: Remove grub
+    yum: 
+      name: grub
+      state: absent
+
+  - name: Install grub2
+    yum:
+      name: grub2
+      state: latest
+
+  - name: Update /etc/default/grub
+    copy:
+      dest: /etc/default/grub
+      content: |
+        GRUB_TIMEOUT=5
+        GRUB_DISTRIBUTOR="$(sed 's, release .*$,,g' /etc/system-release)"
+        GRUB_DEFAULT=saved
+        GRUB_DISABLE_SUBMENU=true
+        GRUB_TERMINAL_OUTPUT="console"
+        GRUB_CMDLINE_LINUX="nofb spl0ash=quiet crashkernel=auto rd.lvm.lv=vg_os/lv_root rd.lvm.lv=vg_os/lv_swap quiet"
+        GRUB_DISABLE_RECOVERY="true"
+
+  - name: Install grub2
+    shell: grub2-install /dev/sda
+
+  - name: grub2-mkconfig
+    shell: grub2-mkconfig -o /boot/grub2/grub.cfg
+
+  - name: Do full patching after upgrade
+    yum: 
+      name: "*"
+      state: latest
+
+  - name: Run maintain cookbook
+    shell: chef-client -n maintain -j {{buildjson}}
+
+  - name: Run comply cookbook
+    shell: chef-client -n comply -j {{buildjson}}
+
+  - name: Remove temporary local admin account
+    user:
+      name: "{{ temp_admin_user }}"
+      state: absent
+
+  - name: Remove {{ temp_admin_user }} sudoers
+    file: 
+      path: '/etc/sudoers.d/{{ temp_admin_user }}'
+      state: absent
+
+  # - name: Shutdown
+  # - name: Change "Guest O/S Type" in vCentre
+  # - name: Start VM

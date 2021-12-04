@@ -1,0 +1,83 @@
+- hosts: servers1
+  become: yes
+  gather_facts: no
+  vars: 
+    # AppID: ''
+  tasks:
+  - name: Check build.json exists
+    stat: 
+      path: /var/build/build.json
+    register: build_json_stat
+
+  - fail:
+      msg: "/var/build/build.json file not exists"
+    when: not build_json_stat.stat.exists 
+
+  - name: Take backup of build.json
+    copy: 
+      src: /var/build/build.json
+      dest: /var/build/build_orig.json
+      backup: true
+      remote_src: true
+
+  - name: Load var from /var/build/build.json
+    slurp:
+      src: /var/build/build.json
+    register: imported_json_var
+
+  - name: Check if App_ID is already set
+    set_fact:
+      current_appid_value: "{{ imported_json_var.content|b64decode|from_json|json_query('app_id')  }}"
+
+  - debug:
+      msg: "app_id is currently set to {{ current_appid_value|default('None', true) }}"
+
+  - name: Pause and Confirm to change the App_ID if it is already set
+    pause: 
+      prompt: "Are you sure to go ahead with updating the current appid?(yes)"
+    when: current_appid_value|length
+
+  - name: Confirm to go ahead to add AppID
+    pause: 
+
+  - name: append imported_var with AppID
+    set_fact:
+      updated_json_var: "{{ imported_json_var.content|b64decode|from_json | default([]) | combine({ 'app_id': AppID }, recursive=True) }}"
+
+  - name: Update /var/build/build.json
+    copy: 
+      content: "{{ updated_json_var | to_nice_json }}" 
+      dest: /var/build/build.json
+      mode: 0644
+      owner: root
+      group: root
+    register: app_id_update
+
+  - name: Load var from /var/build/build.json for verification
+    slurp:
+      src: /var/build/build.json
+    register: appid_value_r
+
+  - name: find the value of App_ID
+    set_fact:
+      appid_value: "{{ appid_value_r.content|b64decode|from_json|json_query('app_id')  }}"
+
+  - name: Show the value of App_ID in {{ inventory_hostname }}
+    debug:
+      msg: "{{ appid_value }}"
+
+  - name: Assert the app_id is correctly set
+    assert:
+      that: 
+        - appid_value is defined
+        - appid_value == AppID
+      fail_msg: "AppID value is not correctly set" 
+      success_msg: "AppID value is set to {{ appid_value }}"
+
+  - name: Show the content of build.json after the update
+    debug: 
+      msg: "{{ appid_value_r.content|b64decode|from_json }}"
+
+  # - name: Perform a chef run to save to value to the node attributes on CHEF server
+  #   shell: chef-client -n comply -j /var/build/build.json
+  #   when: app_id_update is success

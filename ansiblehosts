@@ -1,0 +1,10 @@
+[servers1]
+
+
+
+[all:vars]
+ansible_ssh_user=pa0034ut
+ansible_ssh_pass='z+HnH1%k6hk_Q<D'
+
+#ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q capsule-ln243c"'
+

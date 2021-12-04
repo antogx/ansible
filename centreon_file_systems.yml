@@ -1,0 +1,83 @@
+- hosts: central:remote:pollers:central_db:remote_db
+  become: yes
+  gather_facts: no
+  vars:
+    central_fs:
+      - name: '/var/lib/centreon'
+        size: 10
+      - name: '/var/lib/centreon-broker'
+        size: 6
+      - name: '/var/cache/centreon/backup'
+        size: 10
+
+    db_fs:
+      - name: '/var/lib/mysql'
+        size: 18
+      - name: '/var/cache/centreon/backup'
+        size: 10
+
+    poller_fs:
+      - name: '/var/lib/centreon-broker'
+        size: 10
+      - name: '/var/cache/centreon/backup'
+        size: 10
+
+  tasks:
+  - name: Umount data lv which was created during the build
+    mount: 
+      path: /data
+      state: absent
+    register: umount
+
+  - name: Remove data lv
+    lvol:
+      vg: app
+      lv: app
+      state: absent
+      force: yes
+    when: umount is succeeded
+
+  - name: remove VG app
+    lvg: 
+      vg: app
+      state: absent
+
+  - name: Create VG vg_app
+    lvg:
+      vg: vg_app
+      pvs: /dev/sdb
+
+  - name: Create LVs
+    lvol:
+      vg: vg_app
+      lv: "lv_{{ item.name.split('/')[-1].split('-')[-1] }}"
+      size: "{{ item.size }}G"
+      # force: yes
+      # resizefs: yes ##Use only when you resize FS
+    loop: "{{central_fs if ['central', 'remote']|intersect(group_names) else 
+    db_fs if ['central_db', 'remote_db']|intersect(group_names) else poller_fs if 'pollers' in  group_names}}"
+
+  - name: Create XFS File system
+    filesystem:
+      dev: "/dev/vg_app/lv_{{ item.name.split('/')[-1].split('-')[-1] }}"
+      fstype: xfs
+      # resizefs: yes ##Use only when you resize FS
+    loop: "{{central_fs if ['central', 'remote']|intersect(group_names) else 
+    db_fs if ['central_db', 'remote_db']|intersect(group_names) else poller_fs if 'pollers' in  group_names}}"
+
+  - name: Create mount point, fstab entry and mount
+    mount: 
+      path: "{{ item.name }}"
+      src: "/dev/vg_app/lv_{{ item.name.split('/')[-1].split('-')[-1] }}"
+      fstype: xfs
+      state: mounted
+    loop: "{{central_fs if ['central', 'remote']|intersect(group_names) else 
+    db_fs if ['central_db', 'remote_db']|intersect(group_names) else poller_fs if 'pollers' in  group_names}}"
+
+  - name: Check the FS in df 
+    shell: df -h|grep vg_app
+    register: df
+
+  - name: Show the FS in DF
+    debug:
+      var: df.stdout_lines
