@@ -42,3 +42,5 @@
     with_items: [80, 443, 5647, 8000, 8140, 8443, 9090]
     when: "'ln243c' in inventory_hostname"
     register: port_status
+
+
