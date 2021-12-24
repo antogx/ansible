@@ -1,14 +1,19 @@
 - hosts: central:central_db:pollers
   become: yes
+  gather_facts: no
   vars: 
     centreon_version: '21.10'
     php_version: "{{ '7.3' if centreon_version == '21.04' else 
-                'remi-8.0' if centreon_version == '21.10' }}" ## Refer documentation for future releases
+                     'remi-8.0' if centreon_version == '21.10' }}" ## Refer documentation for future releases
     cert_name: "{{ 'centreon-dev.unix.srv.westpac.com.au.pem' if 'dlw210729164826' in inventory_hostname else
                    'dlw210729164918.obm.nix.srv.westpac.com.au.pem' if 'dlw210729164918' in inventory_hostname else
                    'pli211119171317.obm.nix.srv.westpac.com.au.pem' if 'pli211119171317' in inventory_hostname }}"
-  gather_facts: no
+
   tasks:
+
+  - name: Confirm the Centreon Version
+    pause:
+      prompt: 'Are you sure upgrade to Centreon version: {{centreon_version}}'
 
   - name: Enable Centreon repos
     include_tasks: centreon_repo_task.yml
@@ -123,7 +128,9 @@
     block:       
     - name: Update centreon packages on Pollers
       dnf:
-        name: centreon-poller-centreon-engine
+        name: 
+          - centreon-poller-centreon-engine
+          - nagios-plugins-nrpe
         state: latest  #Make sure its latest
         enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
           rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
