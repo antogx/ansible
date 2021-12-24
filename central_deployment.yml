@@ -1,15 +1,41 @@
 - hosts: central:central_db
   become: yes
   gather_facts: no
+  vars: 
+    centreon_version: '21.04'
+    php_version: "{{ '7.3' if centreon_version == '21.04' else 
+                  'remi-8.0' if centreon_version == '21.10' }}" ## Refer documentation for future releases
+    cert_name: "{{ 'centreon-dev.unix.srv.westpac.com.au.pem' if 'dlw210729164826' in inventory_hostname else
+                'dlw210729164918.obm.nix.srv.westpac.com.au.pem' if 'dlw210729164918' in inventory_hostname else
+                'pli211119171317.obm.nix.srv.westpac.com.au.pem' if 'pli211119171317' in inventory_hostname }}"
+  
   tasks:
 
-  - name: Enable Centreon artifactory_repo
-    include_tasks: artifactory_repo_task.yml
+  - name: Enable Centreon repo
+    include_tasks: centreon_repo_task.yml
+
+  - name: yum clean all
+    command: yum clean all
+    args:
+      warn: no
 
   - name: Centreon packages installation 
     block:       
-    - name: Enable PHP 7.3
-      command: dnf module enable php:7.3 -y
+
+    - name: list enabled php module
+      command: dnf module list php -y
+      register: dnf_module
+      args:
+        warn: no
+
+    - name: dnf module reset php -y
+      command: dnf module reset php -y
+      args:
+        warn: no
+      when: php_version + ' [e]' not in dnf_module.stdout
+
+    - name: Enable PHP {{php_version}}
+      command: dnf module enable php:{{php_version}} -y
       args:
         warn: no
 
@@ -23,8 +49,8 @@
         var: dnf_module.stdout_lines
 
     - fail:
-        msg: "PHP 7.3 is not activated"
-      when: "'7.3 [e]' not in dnf_module.stdout"
+        msg: "PHP {{php_version}} is not activated"
+      when: php_version + ' [e]' not in dnf_module.stdout
 
     - name: Install centreon packages
       dnf:
@@ -36,7 +62,16 @@
           - openssl
         state: installed
         enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
-        rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+          rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: Update /etc/httpd/conf.d/10-centreon.conf for Centreon {{ centreon_version }}
+      template: 
+        src: 10-centreon.conf_{{centreon_version}}.j2
+        dest: /etc/httpd/conf.d/10-centreon.conf
+        mode: 0644
+        owner: root
+        group: root
+        backup: yes
 
     - name: Set the PHP time zone
       lineinfile:
@@ -97,11 +132,16 @@
         name: centreon-database
         state: installed
         enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
-        rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+          rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
 
     - name: deamon-reload
       systemd:
         daemon_reload: yes
+
+    - name: Remove /var/lib/mysql/.bash_profile
+      command: rm -rf /var/lib/mysql/.bash_profile
+      args:
+        warn: no
 
     - name: restart mariadb
       service: 
@@ -145,5 +185,6 @@
         name: nrpe
         state: restarted
       when: cfg_task.changed
-
+    
     when: "'central_db' in  group_names" 
+    
