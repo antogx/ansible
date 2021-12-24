@@ -1,0 +1,146 @@
+- hosts: central:central_db:pollers
+  become: yes
+  vars: 
+    centreon_version: '21.10'
+    php_version: "{{ '7.3' if centreon_version == '21.04' else 
+                'remi-8.0' if centreon_version == '21.10' }}" ## Refer documentation for future releases
+    cert_name: "{{ 'centreon-dev.unix.srv.westpac.com.au.pem' if 'dlw210729164826' in inventory_hostname else
+                   'dlw210729164918.obm.nix.srv.westpac.com.au.pem' if 'dlw210729164918' in inventory_hostname else
+                   'pli211119171317.obm.nix.srv.westpac.com.au.pem' if 'pli211119171317' in inventory_hostname }}"
+  gather_facts: no
+  tasks:
+
+  - name: Enable Centreon repos
+    include_tasks: centreon_repo_task.yml
+
+  - name: yum clean all
+    command: yum clean all
+    args:
+      warn: no
+
+## Centreon upgrade on Central
+  - name: Centreon upgrade on Central to {{ centreon_version }}
+    block:    
+
+    - name: list enabled php module
+      command: dnf module list php -y
+      register: dnf_module
+      args:
+        warn: no
+
+    - name: dnf module reset php -y
+      command: dnf module reset php -y
+      args:
+        warn: no
+      when: php_version + ' [e]' not in dnf_module.stdout
+      
+    - name: Enable PHP {{php_version}}
+      command: dnf module enable php:{{php_version}} -y
+      args:
+        warn: no
+
+    - name: list enabled module
+      command: dnf module list php
+      register: dnf_module
+      args:
+        warn: no
+
+    - debug:
+        var: dnf_module.stdout_lines
+
+    - name: fail if PHP is not set
+      fail:
+        msg: "PHP {{php_version}} is not activated"
+      when: php_version + ' [e]' not in dnf_module.stdout
+
+    - name: Stop cbd service
+      service:
+        name: cbd
+        state: stopped
+
+    - name: Delete existing retention files
+      command: rm -f /var/lib/centreon-broker/* 
+      args:
+        warn: no
+
+    - name: Update centreon packages to latest
+      dnf:
+        name: 
+          - centreon-base-config-centreon-engine 
+          - centreon-widget*
+        state: latest  #Make sure its latest
+        enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
+          rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: Update /etc/httpd/conf.d/10-centreon.conf for Centreon {{ centreon_version }}
+      template: 
+        src: 10-centreon.conf_{{centreon_version}}.j2
+        dest: /etc/httpd/conf.d/10-centreon.conf
+        mode: 0644
+        owner: root
+        group: root
+        backup: yes
+
+    - name: Restart httpd service
+      service:
+        name: httpd
+        state: restarted
+
+    - name: Pause to do the upgrade from Web UI
+      pause:
+        prompt: Login to Centreon Web UI and finish upgrade there. Use IP to login WEB UI (https://<IP>)
+
+    ## Services
+    - name: Restart services
+      service:
+        name: "{{item}}"
+        state: restarted
+        enabled: yes
+      loop: [php-fpm, httpd, centreon, cbd, centengine, gorgoned]
+
+    when: "'central' in  group_names" 
+
+## Centreon upgrade on DB
+  - name: Centreon upgrade on DB servers 
+    block:       
+    - name: Update centreon packages DB server
+      dnf:
+        name: centreon-database
+        state: latest  #Make sure its latest
+        enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
+          rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: restart mariadb
+      service: 
+        name: mariadb
+        state: restarted
+        enabled: yes
+
+    when: "'central_db' in  group_names" 
+
+## Centreon upgrade on Pollers
+  - name: Centreon upgrade on Pollers 
+    block:       
+    - name: Update centreon packages on Pollers
+      dnf:
+        name: centreon-poller-centreon-engine
+        state: latest  #Make sure its latest
+        enablerepo: "Westpac_EPEL_epel_rhel8_x86-64, codeready-builder-for-rhel-8-x86_64-rpms, 
+          rhel-8-for-x86_64-appstream-rpms, rhel-8-for-x86_64-baseos-rpms, rhel8_centreon_stable, rhel8_centreon_stable_noarch"
+
+    - name: Start and Enable the services
+      service:
+        name: "{{ item }}"
+        enabled: yes
+        state: restarted
+      loop: [centengine, centreon, gorgoned]
+
+    when: "'pollers' in  group_names"
+
+
+    # Take snapshot
+    # Upgrade central
+      # Update your customized Apache configuration
+      # diff -u /opt/rh/httpd24/root/etc/httpd/conf.d/10-centreon.conf /opt/rh/httpd24/root/etc/httpd/conf.d/10-centreon.conf.rpmnew
+    # Upgrade DB
+    # Upgrade Poller
