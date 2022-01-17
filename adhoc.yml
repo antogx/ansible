@@ -1,0 +1,7 @@
+- hosts: production
+  become: yes
+  gather_facts: yes
+  vars:
+  tasks:
+  - debug:
+      msg: "{{ ansible_facts.ens160.ipv4.address }}"

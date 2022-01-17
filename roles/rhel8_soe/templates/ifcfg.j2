@@ -1,0 +1,11 @@
+TYPE=Ethernet
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=none
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+NAME={{interface.stdout}}
+UUID={{uuid.stdout}}
+DEVICE={{interface.stdout}}
+ONBOOT=yes
+IPADDR={{ansible_facts.ens160.ipv4.address}}

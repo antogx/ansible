@@ -1,19 +1,15 @@
 - name: find the primary interface
-  shell: ls /etc/sysconfig/network-scripts|head -1
-  register: interface_result
+  shell: ls /etc/sysconfig/network-scripts/|grep ^ifcfg|head -1
+  register: interface
 
-- name: Update Interface config file with BOOTPROTO STATIC
-  lineinfile:
-    line: BOOTPROTO="static"
-    regexp: BOOTPROTO*
-    path: /etc/sysconfig/network-scripts/{{ interface_result['stdout'] }}
-  
-- name: Update Interface config file with IPADDR
-  lineinfile:
-    line: IPADDR='{{ansible_all_ipv4_addresses[0]}}'
-    regexp: IPADDR*
-    path: /etc/sysconfig/network-scripts/{{ interface_result['stdout'] }}
-  notify: Reload Network
+- name: Temlate the ifcfg file
+  template:
+    src: ifcfg.j2
+    dest: /etc/sysconfig/network-scripts/
+    mode: 0644
+    owner: root
+    group: root
+
 
 
 
