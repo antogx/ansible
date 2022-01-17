@@ -1,0 +1,6 @@
+---
+- include_tasks: repos.yml
+  when: inventory_hostname in groups['development'] or inventory_hostname in groups['production']
+- include_tasks: hostname.yml
+- include_tasks: network.yml
+- include_tasks: hostsfile.yml

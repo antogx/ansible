@@ -1,0 +1,27 @@
+- name: Copy rhel8.repo from master
+  stat: 
+    path: /etc/yum.repos.d/rhel8.repo
+  register: source_rhel8_repo_result
+  delegate_to: localhost
+
+- copy: 
+    src: /etc/yum.repos.d/rhel8.repo
+    dest: /etc/yum.repos.d/rhel8.repo
+  register: dest_rhel8_repo_result
+  failed_when: source_rhel8_repo_result.stat.checksum != dest_rhel8_repo_result.checksum
+
+- name: Install EPEL Repo
+  yum:
+    name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+    state: present
+  changed_when: true
+  notify: Yum Clean
+   
+    
+  
+
+
+  
+    
+
+  

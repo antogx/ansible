@@ -1,0 +1,18 @@
+---
+- set_fact:
+    suffix: "{{ ansible_ens160.ipv4.address.split('.')[-1] }}"
+
+- name: set HostName for Dev 
+  shell: /usr/bin/hostnamectl set-hostname dev{{suffix}}
+  when: inventory_hostname in groups['development']
+
+- name: set HostName for Prod
+  shell: /usr/bin/hostnamectl set-hostname prod{{suffix}}
+  when: inventory_hostname in groups['production']
+
+- name: set HostName for Master
+  shell: /usr/bin/hostnamectl set-hostname master
+  when: inventory_hostname in groups['control'] 
+
+
+

@@ -1,0 +1,10 @@
+- name: Gathering facts
+  setup:
+
+- name: Update /etc/hosts on all hosts
+  template:
+    src: hostsfile.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: 0644

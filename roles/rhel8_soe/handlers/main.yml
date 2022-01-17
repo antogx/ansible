@@ -1,0 +1,10 @@
+---
+- name: Reload Network
+  service:
+    name: NetworkManager
+    state: reloaded
+
+- name: Yum Clean
+  command: yum clean all
+  args:
+    warn: no 
