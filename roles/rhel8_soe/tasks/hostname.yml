@@ -1,8 +1,12 @@
 ---
+- name: include host details file
+  include_vars: ipam.yml
+
 - set_fact:
-    hostname: "dev{{ ansible_ens160.ipv4.address.split('.')[-1] }} if inventory_hostname in groups['development'] else 
-              "prod{{ ansible_ens160.ipv4.address.split('.')[-1] }} if inventory_hostname in groups['production'] else 
-              "master if inventory_hostname in groups['control'] "
+    hostname: "{% for host in host_ips %}{% if inventory_hostname == host['name'] %}{{ host['name'] }}{% endif %}{% endfor %}"
+
+- debug:
+    var: hostname
 
 - name: set HostName
   shell: /usr/bin/hostnamectl set-hostname {{hostname}}

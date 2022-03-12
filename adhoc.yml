@@ -3,5 +3,5 @@
   gather_facts: yes
   vars:
   tasks:
-  - debug:
+  - ansible.builtin.debug:
       msg: "{{ ansible_facts.ens160.ipv4.address }}"

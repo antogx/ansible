@@ -2,4 +2,4 @@
   become: yes
   gather_facts: no
   tasks:
-  - include_tasks: artifactory_repo_task.yml
+  - include_roles: artifactory_repo_task.yml

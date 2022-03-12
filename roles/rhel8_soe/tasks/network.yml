@@ -2,13 +2,14 @@
   shell: ls /etc/sysconfig/network-scripts/|grep ^ifcfg|head -1
   register: interface
 
-- name: Temlate the ifcfg file
+- name: Template the ifcfg file
   template:
-    src: ifcfg.j2
-    dest: /etc/sysconfig/network-scripts/
+    src: ifcfg_ens160.j2
+    dest: /etc/sysconfig/network-scripts/ifcfg-ens160
     mode: 0644
     owner: root
     group: root
+  notify: 'Reload Network'
 
 
 

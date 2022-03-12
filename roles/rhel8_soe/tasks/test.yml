@@ -1,0 +1,4 @@
+  
+  - include_vars: ipam.yml
+  - debug:  
+      msg: "{% for host in host_ips %}{% if inventory_hostname == host['name'] %}{{host['ip1']}}{% endif %}{% endfor %}"

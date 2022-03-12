@@ -1,19 +1,28 @@
-- name: Copy rhel8.repo from master
-  stat: 
-    path: /etc/yum.repos.d/rhel8.repo
-  register: source_rhel8_repo_result
-  delegate_to: localhost
+- name: Copy rhel8 iso
+  copy:
+    src: /home/antogx/rhel-8.4-x86_64-dvd.iso
+    dest: /home/antogx/rhel-8.4-x86_64-dvd.iso
+
+- name: Mount the iso
+  mount:
+    path: /media/rhel8-server
+    src: /home/antogx/rhel-8.4-x86_64-dvd.iso 
+    fstype: auto
+    opts: loop
+    state: mounted
 
 - copy: 
-    src: /etc/yum.repos.d/rhel8.repo
-    dest: /etc/yum.repos.d/rhel8.repo
+    src: "{{ item }}"
+    dest: "{{ item }}"
   register: dest_rhel8_repo_result
-  failed_when: source_rhel8_repo_result.stat.checksum != dest_rhel8_repo_result.checksum
+  loop:
+    - /etc/yum.repos.d/rhel8-server-BaseOS.repo
+    - /etc/yum.repos.d/rhel8-server-AppStream.repo
 
 - name: Install EPEL Repo
   yum:
     name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-    state: present
+    state: installed
   changed_when: true
   notify: Yum Clean
    

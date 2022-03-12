@@ -1,0 +1,10 @@
+TYPE=Ethernet
+PROXY_METHOD=none
+BROWSER_ONLY=no
+BOOTPROTO=none
+DEFROUTE=yes
+IPV4_FAILURE_FATAL=no
+NAME=ens160
+DEVICE=ens160
+ONBOOT=yes
+IPADDR={% for host in host_ips %}{% if inventory_hostname == host['name'] %}{{ host['ip1'] }}{% endif %}{% endfor %}

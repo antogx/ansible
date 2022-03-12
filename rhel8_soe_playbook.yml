@@ -1,0 +1,10 @@
+- hosts: all
+  become: yes
+  gather_facts: yes
+  # vars_files:
+  #   - roles/rhel8_soe/vars/ipam.yml
+  vars:
+  tasks:
+  - include_role:
+      name: rhel8_soe
+
