@@ -1,14 +1,15 @@
 [development]
-
-
+kube        ansible_host=192.168.190.129
+worker1     ansible_host=192.168.190.127
+worker2     ansible_host=192.168.190.133
 [production]
-prod129  ansible_host=192.168.190.129
+
 
 [control]
 master 
 
 [all:vars]
-ansible_ssh_user=antogx
+ansible_ssh_user=root
 ansible_ssh_pass=agdotg
 
 #ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p -q capsule-ln243c"'

@@ -1,0 +1,6 @@
+- name: Reboot
+  reboot:
+    msg: "Reboot"
+    reboot_timeout: 180
+    post_reboot_delay: 10
+  when: sestatus is changed

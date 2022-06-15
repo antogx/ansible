@@ -1,10 +1,12 @@
 - hosts: all
   become: yes
+  become_method: sudo
   gather_facts: yes
-  # vars_files:
-  #   - roles/rhel8_soe/vars/ipam.yml
   vars:
   tasks:
+  - name: Pause to verify the vars/ipam.yml is updated
+    pause:
+      prompt: Confirm vars/ipam.yml is updated correctly ?
+  
   - include_role:
       name: rhel8_soe
-

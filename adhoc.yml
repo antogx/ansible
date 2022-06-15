@@ -1,7 +1,8 @@
-- hosts: production
+- hosts: localhost
   become: yes
-  gather_facts: yes
+  gather_facts: false
   vars:
+    - fullname: '/first/second'
   tasks:
   - ansible.builtin.debug:
-      msg: "{{ ansible_facts.ens160.ipv4.address }}"
+      msg: "{{ fullname|basename }}"

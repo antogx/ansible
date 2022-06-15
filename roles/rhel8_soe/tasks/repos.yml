@@ -20,9 +20,11 @@
     - /etc/yum.repos.d/rhel8-server-AppStream.repo
 
 - name: Install EPEL Repo
-  yum:
+  dnf:
     name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
     state: installed
+    validate_certs: false
+    disable_gpg_check: true
   changed_when: true
   notify: Yum Clean
    
