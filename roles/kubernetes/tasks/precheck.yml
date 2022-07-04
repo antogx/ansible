@@ -1,0 +1,21 @@
+- name: Get kube cluster status
+  shell: kubectl get nodes|egrep -v 'NAME|NotReady' |cut -d " " -f1
+  register: cluster
+  become_user: "{{user}}"
+
+- name: Set fact | list nodes in cluster
+  set_fact: 
+    cluster_nodes: "{{ cluster.stdout_lines }}"
+
+- debug: 
+    msg: "{{ cluster_nodes }}"
+
+- name: Get saved join command from kube master
+  shell: cat {{home}}/.kube/worker_join_command_saved
+  register: join_command_saved 
+  failed_when: false
+
+- name: set fact | saved join command
+  set_fact: 
+    worker_join_command_saved: "{{ join_command_saved.stdout }}"
+  failed_when: false

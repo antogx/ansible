@@ -1,0 +1,16 @@
+- name: Set fact | command to join workers
+  set_fact:
+    join_workers_command: "{{ hostvars['kube']['worker_join_command_current'] if hostvars['kube']['worker_join_command_current'] is defined else
+      hostvars['kube']['worker_join_command_saved'] }}"
+
+- debug: 
+    msg: "{{ join_workers_command }}"
+
+- name: Join workers
+  shell: "{{ join_workers_command }}"
+  when: inventory_hostname.startswith('worker')
+
+- name: pause for 10s
+  pause:
+    seconds: 10
+

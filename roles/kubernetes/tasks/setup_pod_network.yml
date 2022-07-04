@@ -1,0 +1,9 @@
+- name: Setup pod network 
+  get_url:
+    url: https://docs.projectcalico.org/manifests/calico-typha.yaml
+    dest: "{{home}}/calico.yaml"
+    force_basic_auth: yes
+
+- name: apply calico 
+  shell: "kubectl apply -f {{home}}/calico.yaml"
+  become_user: '{{user}}'

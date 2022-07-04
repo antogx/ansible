@@ -1,0 +1,35 @@
+- name: kubeadm initialization
+  shell: 'kubeadm init --apiserver-advertise-address={{ansible_facts.ens160.ipv4.address}} --pod-network-cidr={{cidr}}'
+  register: kubeadm_init
+  ignore_errors: true
+
+- debug: 
+    msg: "{{ kubeadm_init.stdout.split('kubeadm join')[1]|replace('\\\n\t', '') }}"
+
+- name: set fact | kubeadm join command
+  set_fact:
+    worker_join_command_current: "kubeadm join {{ kubeadm_init.stdout.split('kubeadm join')[1]|replace('\\\n\t', '') }}"
+
+- name: Create {{home}}/.kube
+  file:
+    path: '{{home}}/.kube'
+    owner: '{{user}}'
+    state: directory
+    
+- name: Save kubeadm join command to a file - {{home}}/.kube/worker_join_command_saved
+  copy:
+    content: "{{ worker_join_command_current }}"
+    dest: '{{home}}/.kube/worker_join_command_saved'
+    backup: yes
+
+- name: Copy admin.conf to {{home}}/.kube
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: '{{home}}/.kube/config'
+    owner: '{{user}}'
+    remote_src: true
+
+- name: Confirm kubectl command is activated
+  command: kubectl get nodes
+  become_user: '{{user}}'
+  register: get_nodes

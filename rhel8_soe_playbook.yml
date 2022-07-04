@@ -2,7 +2,6 @@
   become: yes
   become_method: sudo
   gather_facts: yes
-  vars:
   tasks:
   - name: Pause to verify the vars/ipam.yml is updated
     pause:
@@ -10,3 +9,6 @@
   
   - include_role:
       name: rhel8_soe
+
+
+###ftp yum repo

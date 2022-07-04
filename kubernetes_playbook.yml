@@ -1,0 +1,18 @@
+- hosts: kube_cluster1
+  become: true
+  become_method: sudo
+  gather_facts: true
+  vars:
+    kubadm_ver: kubeadm-1.23*
+  tasks:  
+  - include_role:
+      name: kubernetes
+
+
+
+
+
+
+
+##ansiblify docker commands
+##alias and source ~/.bashrc 

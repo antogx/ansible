@@ -1,0 +1,7 @@
+- name: Confirm workers are joined
+  shell: kubectl get nodes -o wide
+  register: get_nodes
+  become_user: '{{user}}'
+
+- debug:
+    msg: "{{ get_nodes.stdout_lines }}"

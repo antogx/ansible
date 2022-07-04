@@ -1,0 +1,52 @@
+- name: Create kubernetes Repo 
+  blockinfile:
+    path: /etc/yum.repos.d/kubernetes.repo
+    block: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+      enabled=1
+      gpgcheck=1
+      repo_gpgcheck=1
+      gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+    create: true
+    owner: root
+
+- name: Install kubernetes
+  dnf: 
+    name: "{{kubeadm_ver}}" 
+    state: latest
+
+- name: Start and enable kubelet 
+  systemd:
+    name: kubelet 
+    state: started
+    enabled: true 
+
+- name: Swap off
+  command: swapoff -a
+
+- name: Disable SWAP in fstab since kubernetes can't work with swap enabled
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*?\sswap\s+.*)$'
+    replace: '# \1'
+
+- name: Remove /etc/containerd/config.toml
+  file: 
+    path: /etc/containerd/config.toml
+    state: absent
+
+- name: Restart containerd 
+  systemd: 
+    name: containerd
+    state: restarted
+
+- name: kubeadm reset
+  shell: kubeadm reset -f
+
+- name: Remove /var/lib/etcd
+  file: 
+    path: /var/lib/etcd
+    state: absent
+

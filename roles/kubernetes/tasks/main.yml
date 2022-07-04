@@ -1,0 +1,26 @@
+---
+- include_tasks: precheck.yml
+  when: inventory_hostname.startswith('kube')
+
+- include_tasks: alias_bashrc.yml
+  when: inventory_hostname.startswith('kube')
+
+- block:
+    - include_tasks: docker.yml
+
+    - include_tasks: kubernetes.yml
+
+    - include_tasks: kube_master_init.yml
+      when: inventory_hostname.startswith('kube')
+
+    - include_tasks: setup_pod_network.yml
+      when: inventory_hostname.startswith('kube') 
+
+    - include_tasks: kubeadm_join.yml
+
+  when: inventory_hostname not in hostvars['kube']['cluster_nodes']
+
+- include_tasks: kubectl_get_nodes.yml
+  when: inventory_hostname.startswith('kube')
+
+
