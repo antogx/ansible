@@ -3,6 +3,8 @@
   become_method: sudo
   gather_facts: yes
   tasks:  
+  - debug:
+      msg: "Test"
   - include_role:
       name: rhel8_soe
 
