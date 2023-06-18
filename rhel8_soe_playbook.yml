@@ -2,11 +2,7 @@
   become: yes
   become_method: sudo
   gather_facts: yes
-  tasks:
-  - name: Pause to verify the vars/ipam.yml is updated
-    pause:
-      prompt: Confirm vars/ipam.yml is updated correctly ?
-  
+  tasks:  
   - include_role:
       name: rhel8_soe
 
