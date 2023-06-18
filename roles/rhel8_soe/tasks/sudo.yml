@@ -1,5 +1,5 @@
 - name: Update sudoers
-  community.general.sudoers:
+  sudoers:
     name: antogx_sudo_access
     state: present
     user: antogx
