@@ -3,12 +3,13 @@ kube        ansible_host=192.168.190.129
 worker1     ansible_host=192.168.190.127
 worker2     ansible_host=192.168.190.133
 worker3     ansible_host=192.168.190.136
+chef-server ansible_host=192.168.190.141
 
 
 [development]
 
 [production]
-
+tulcptower01    ansible_host=192.168.190.138
 
 [control]
 master 

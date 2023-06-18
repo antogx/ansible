@@ -3,10 +3,12 @@
     path: /home/antogx/rhel-8.4-x86_64-dvd.iso
   register: rhel8_dvd 
 
+
 - name: Copy rhel8 iso
   copy:
     src: /home/antogx/rhel-8.4-x86_64-dvd.iso
     dest: /home/antogx/rhel-8.4-x86_64-dvd.iso
+  register: copy_status
   when: not rhel8_dvd.stat.exists
 
 - name: Mount the iso

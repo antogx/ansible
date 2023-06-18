@@ -14,7 +14,7 @@
 
 - name: Install kubernetes
   dnf: 
-    name: "{{kubeadm_ver}}" 
+    name: kubeadm
     state: latest
 
 - name: Start and enable kubelet 

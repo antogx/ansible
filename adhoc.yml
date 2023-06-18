@@ -1,18 +1,13 @@
-- hosts: worker1
+- hosts: localhost
   become: yes
   gather_facts: false
   vars:
     - fullname: '/first/second'
   tasks:
-  - name: Check running kubernetes or docker processes
-    shell: ps aux|egrep -i 'kube'|grep -v grep
-    register: kube_process
+  - mymodule:
+      firstname: roms
+      lastname: davids
+    register: name1
 
-  - debug:
-      msg: "{{ item.split()[1] }}"
-    loop: "{{ kube_process.stdout_lines }}"
-
-  - name: Kill kubernetes or docker processes
-    shell: kill -9 {{ item.split()[1] }}
-    loop: "{{ kube_process.stdout_lines }}"
-    ignore_errors: yes
+  - debug: 
+      var: name1

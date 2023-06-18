@@ -1,5 +1,5 @@
 - name: Confirm workers are joined
-  shell: kubectl get nodes -o wide
+  shell: kubectl get nodes
   register: get_nodes
   become_user: '{{user}}'
 

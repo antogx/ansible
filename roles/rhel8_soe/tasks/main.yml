@@ -7,8 +7,10 @@
 
 - include_tasks: selinux.yml
 
-- include_tasks: repos.yml
-  when: inventory_hostname not in groups['control']
+- include_tasks: runlevel.yml
+
+# - include_tasks: repos.yml
+#   when: inventory_hostname not in groups['control']
 
 - include_tasks: hostname.yml
 

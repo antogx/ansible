@@ -1,0 +1,2 @@
+- name: "Set default to multi-user.target"
+  command: "systemctl set-default multi-user.target"

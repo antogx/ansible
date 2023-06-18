@@ -3,22 +3,34 @@
     yum clean all 
     dnf clean all
 
-- name: Configure docker repo
-  shell: dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
-  args:
-    warn: false
+- name: check containerd is installed
+  shell: rpm -q containerd.io
+  register: containerd_rpm_stat
+  ignore_errors: true
 
 - name: Install containerd.io
   dnf: 
     name: 'https://download.docker.com/linux/centos/8/x86_64/stable/Packages/containerd.io-1.6.6-3.1.el8.x86_64.rpm'
     state: installed
     disable_gpg_check: true
+  when: containerd_rpm_stat is failed
+
+- name: check docker is installed
+  shell: rpm -q docker-ce
+  register: docker_rpm_stat
+  ignore_errors: true
+
+- name: Configure docker repo
+  shell: dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+  args:
+    warn: false
 
 - name: Install docker-ce 
   dnf:
     name: docker-ce
     state: latest 
     disable_gpg_check: true
+  when: docker_rpm_stat is failed
 
 - name: Start and enable docker
   systemd: 
@@ -28,32 +40,13 @@
   register: docker_start 
   ignore_errors: true
 
-- name: Run kill existing kubernetes or docker processes if the docker start fails
+- name: Reboot if the docker start fails
   block:
-
-  - name: Stop docker and kube* services
-    systemd: 
-      name: "{{ item }}"
-      state: stopped
-    loop:
-      - docker
-      - kubelet
-      # - containerd
-    ignore_errors: true
-      
-  - name: Check running kubernetes or docker processes
-    shell: ps aux|egrep -i 'kube|docker'|grep -v grep
-    register: kube_process
-    ignore_errors: true
-
-  - debug:
-      msg: "{{ item.split()[1] }}"
-    loop: "{{ kube_process.stdout_lines }}"
-
-  - name: Kill kubernetes or docker processes
-    shell: kill -9 {{ item.split()[1] }}
-    loop: "{{ kube_process.stdout_lines }}"
-    ignore_errors: true
+  - name: Reboot
+    reboot:
+      msg: "Reboot"
+      reboot_timeout: 180
+      post_reboot_delay: 10
 
   - name: Start and enable docker
     systemd: 
