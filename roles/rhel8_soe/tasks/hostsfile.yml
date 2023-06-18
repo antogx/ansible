@@ -1,9 +1,9 @@
-- name: Gathering facts
-  setup:
-
 - name: Update /etc/hosts on all hosts
-  template:
-    src: hostsfile.j2
+  copy:
+    content: |
+        {% for host in host_ips %}
+        {{ host['ip1'] }} {{ host['name'] }}
+        {% endfor %}
     dest: /etc/hosts
     owner: root
     group: root

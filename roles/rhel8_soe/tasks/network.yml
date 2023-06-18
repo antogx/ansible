@@ -5,7 +5,7 @@
 - name: Template the ifcfg file
   template:
     src: ifcfg_ens160.j2
-    dest: /etc/sysconfig/network-scripts/ifcfg-ens160
+    dest: /etc/sysconfig/network-scripts/{{interface.stdout}}
     mode: 0644
     owner: root
     group: root
