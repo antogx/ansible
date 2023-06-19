@@ -2,8 +2,6 @@
   become: yes
   become_method: sudo
   gather_facts: yes
-  collections:
-    - community.general
   tasks:  
   - debug:
       msg: "Test"
