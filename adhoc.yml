@@ -6,12 +6,12 @@
   - debug:
       msg: "Test"
 
-  # - name: Update sudoers
-  #   sudoers:
-  #     name: antogx_sudo_access
-  #     state: present
-  #     user: antogx
-  #     runas: root
-  #     commands: ALL
-  #     nopassword: yes
+  - name: Update sudoers
+    sudoers:
+      name: antogx_sudo_access
+      state: present
+      user: antogx
+      runas: root
+      commands: ALL
+      nopassword: yes
 
