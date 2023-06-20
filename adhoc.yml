@@ -7,5 +7,5 @@
       msg: "Test"
 
   - name: Update sudoers
-    include_tasks: roles/tasks/reboot.yml
+    include_tasks: roles/rhel8_soe/tasks/reboot.yml
 
