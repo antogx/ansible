@@ -2,17 +2,16 @@
   become: yes
   gather_facts: false
   vars:
-    - fullname: '/first/second'
-  vars_files: roles/rhel8_soe/vars/ipam.yml
-
   tasks:
   - debug:
-      msg: >
-        {% for host in host_ips %}
-        {{'\n'}}
-        {{ host['ip1'] }} {{'\t'}} {{ host['name'] }}
-        {% endfor %}
-    run_once: true
+      msg: "Test"
 
+  - name: Update sudoers
+    sudoers:
+      name: antogx_sudo_access
+      state: present
+      user: antogx
+      runas: root
+      commands: ALL
+      nopassword: yes
 
-##{{ hostvars[host]['ansible_facts']['ansible_default_ipv4']['address'] }}  {{ hostvars[host]['ansible_fqdn'] }} {{ hostvars[host]['ansible_hostname'] }}
