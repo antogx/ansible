@@ -4,14 +4,6 @@
   gather_facts: yes
   tasks:  
   
-#   - include_role:
-#       name: rhel8_soe
-    - name: Update sudoers
-      sudoers:
-        name: antogx_sudo_access
-        state: present
-        user: antogx
-        runas: root
-        commands: ALL
-        nopassword: yes
+  - include_role:
+      name: rhel8_soe
 
