@@ -7,7 +7,7 @@
 #   - include_role:
 #       name: rhel8_soe
     - name: Update sudoers
-    sudoers:
+      sudoers:
         name: antogx_sudo_access
         state: present
         user: antogx
