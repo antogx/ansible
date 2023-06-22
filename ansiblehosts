@@ -9,7 +9,7 @@ chef-server ansible_host=192.168.190.141
 [development]
 
 [production]
-tulcptower01    ansible_host=192.168.190.138
+tulcptower02    ansible_host=192.168.190.125
 
 [control]
 master 
