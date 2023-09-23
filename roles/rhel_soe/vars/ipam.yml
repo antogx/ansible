@@ -1,0 +1,26 @@
+---
+host_ips:
+- name: 'master.localdomain'
+  ip1: '192.168.190.128'
+
+- name: 'worker1.localdomain'
+  ip1: '192.168.190.127'
+
+- name: chef-server.localdomain
+  ip1: '192.168.190.141'
+
+- name: tulcptower02.localdomain
+  ip1: '192.168.190.125'
+
+- name: tulcpeda01.localdomain
+  ip1: '192.168.190.134'
+
+- name: tulcpaap01.localdomain
+  ip1: '192.168.190.136'
+
+- name: tulcpaap02.localdomain
+  ip1: '192.168.190.139'
+
+- name: tulcpeda02.localdomain
+  ip1: '192.168.190.140'
+

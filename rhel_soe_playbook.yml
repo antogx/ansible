@@ -5,5 +5,5 @@
   tasks:  
   
   - include_role:
-      name: rhel8_soe
+      name: rhel_soe
 

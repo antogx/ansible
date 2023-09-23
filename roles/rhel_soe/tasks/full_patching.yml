@@ -1,0 +1,21 @@
+- name: Install required softwares
+  yum:
+    name: 
+      - yum-utils
+    state: latest
+
+- name: Update all packages
+  ansible.builtin.yum:
+    name: '*'
+    state: latest
+  register: patching
+  ignore_errors: true
+  until: patching is not failed
+  retries: 5
+  delay: 5
+
+- name: Check if reboot is required
+  command: /usr/bin/needs-restarting
+  register: needs_restart
+  failed_when: false
+  

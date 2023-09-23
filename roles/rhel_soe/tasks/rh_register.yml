@@ -1,0 +1,8 @@
+- name: Register host to red hat CDN.
+  community.general.redhat_subscription:
+    username: antogxtabcorp
+    password: Agdotg1111
+    auto_attach: true
+    force_register: true
+  register: rh_register
+  

@@ -3,4 +3,5 @@
     msg: "Reboot"
     reboot_timeout: 180
     post_reboot_delay: 10
-  when: sestatus is changed
+  when: "sestatus is changed or 
+         'Reboot is required' in needs_restart.stdout"
