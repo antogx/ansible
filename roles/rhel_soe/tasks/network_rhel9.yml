@@ -1,13 +1,22 @@
-- name: find the primary interface
-  shell: ls /etc/NetworkManager/system-connections|head -1|cut -d "." -f1
-  register: interface
+# - name: find the primary interface
+#   shell: ls /etc/NetworkManager/system-connections|head -1|cut -d "." -f1
+#   register: interface
 
-- name: Configure ip4 address
+- name: Configure Primary interface
   community.general.nmcli:
-    conn_name: "{{ interface.stdout }}"
-    ifname: "{{ interface.stdout }}"
+    conn_name: "{{ primary_interface }}"
+    ifname: "{{ primary_interface }}"
     type: ethernet
-    ip4: "{% for host in host_ips %}{% if inventory_hostname == host['name'] %}{{ host['ip1'] }}{% endif %}{% endfor %}"
+    ip4: "{% for host in host_ips %}{% if inventory_hostname == host['name'] %}{{ host['ip1'] }}{% endif %}{% endfor %}/24"
     state: present
     method4: manual
+  notify: 'Reload Network'
+
+- name: Configure secondary interface
+  community.general.nmcli:
+    conn_name: "{{ secondary_interface }}"
+    ifname: "{{ secondary_interface }}"
+    type: ethernet
+    state: present
+    method4: auto
   notify: 'Reload Network'

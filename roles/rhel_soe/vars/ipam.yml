@@ -21,6 +21,12 @@ host_ips:
 - name: tulcpaap02.localdomain
   ip1: '192.168.190.139'
 
+- name: tulcpadb01.localdomain
+  ip1: '192.168.190.143'
+  
 - name: tulcpeda02.localdomain
   ip1: '192.168.190.140'
+
+
+  
 

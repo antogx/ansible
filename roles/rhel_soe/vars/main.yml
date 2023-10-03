@@ -1,2 +1,4 @@
 ---
 timezone: 'Australia/Sydney'
+primary_interface: ens160
+secondary_interface: ens224

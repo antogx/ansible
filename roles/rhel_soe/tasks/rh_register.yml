@@ -5,4 +5,8 @@
     auto_attach: true
     force_register: true
   register: rh_register
+  ignore_errors: true
+  until: rh_register is not failed
+  retries: 5
+  delay: 5
   

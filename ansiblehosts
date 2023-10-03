@@ -3,10 +3,10 @@
 [development]
 
 [production]
-# tulcptower02.localdomain   ansible_host=192.168.190.125
-# tulcpaap01.localdomain      ansible_host=192.168.190.136
-# tulcpeda01.localdomain      ansible_host=192.168.190.134
-tulcpaap02.localdomain      ansible_host=192.168.190.139
+tulcpaap01.localdomain      ansible_host=192.168.190.136
+tulcpeda01.localdomain      ansible_host=192.168.190.134
+tulcpadb01.localdomain      ansible_host=192.168.190.143
+
 
 [control]
 
