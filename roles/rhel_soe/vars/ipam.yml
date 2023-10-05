@@ -1,13 +1,13 @@
 ---
 host_ips:
+- name: 'control.localdomain'
+  ip1: '192.168.190.145'
+
 - name: 'master.localdomain'
   ip1: '192.168.190.128'
 
 - name: 'worker1.localdomain'
   ip1: '192.168.190.127'
-
-- name: chef-server.localdomain
-  ip1: '192.168.190.141'
 
 - name: tulcptower02.localdomain
   ip1: '192.168.190.125'
@@ -23,7 +23,7 @@ host_ips:
 
 - name: tulcpadb01.localdomain
   ip1: '192.168.190.143'
-  
+
 - name: tulcpeda02.localdomain
   ip1: '192.168.190.140'
 

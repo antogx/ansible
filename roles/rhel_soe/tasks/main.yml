@@ -23,15 +23,14 @@
 - include_tasks: hostsfile.yml
 
 - include_tasks: rh_register.yml
-  when: not inventory_hostname.startswith('master')
 
 - include_tasks: full_patching.yml
   when: 
     - rh_register is changed
-    - not inventory_hostname.startswith('master')
+    - not inventory_hostname.startswith('control')
 
 - include_tasks: reboot.yml
-  when: not inventory_hostname.startswith('master')
+  when: not inventory_hostname.startswith('control')
 
 
 

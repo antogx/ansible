@@ -9,6 +9,7 @@ tulcpadb01.localdomain      ansible_host=192.168.190.143
 
 
 [control]
+control.localdomain         ansible_host=192.168.190.145
 
 [all:vars]
 ansible_ssh_user=root

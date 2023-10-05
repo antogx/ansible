@@ -1,0 +1,9 @@
+- hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+  # - debug:
+  #     msg: "Make Service active"
+  - service:
+      name: dummy.service
+      state: started
