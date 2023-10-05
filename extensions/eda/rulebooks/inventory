@@ -1,0 +1,8 @@
+[servers1]
+tulcpaap01.localdomain
+tulcpeda01.localdomain
+
+[all:vars]
+ansible_ssh_user=antogx
+ansible_ssh_pass=agdotg
+ansible_become_pass=agdotg
