@@ -14,9 +14,6 @@
   rules:
     - name: Say Hello
       condition: event.payload.message == "Service Inactive"
-
-  ## Define the action we should take should the condition be met
-
       action:
         run_job_template:
           name: EDA1 Template
