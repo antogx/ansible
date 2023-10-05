@@ -18,7 +18,10 @@
   ## Define the action we should take should the condition be met
 
       action:
-        run_playbook:
-          name: action.yml
+        run_job_template:
+          name: EDA1 Template
+          organization: Default
+        # run_playbook:
+        #   name: action.yml
 
 ### ansible-rulebook --rulebook webhook.yml -i inventory.yml -v
