@@ -7,4 +7,3 @@ ExecStart=/bin/bash /tmp/test.sh
 
 [Install]
 WantedBy=multi-user.target
-[root@tulcpaap01 ~]#
