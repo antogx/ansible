@@ -1,0 +1,10 @@
+[Unit]
+Description=Dummy Service created for testing purpose by Anto.
+
+[Service]
+RemainAfterExit=yes
+ExecStart=/bin/bash /tmp/test.sh
+
+[Install]
+WantedBy=multi-user.target
+[root@tulcpaap01 ~]#
