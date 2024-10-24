@@ -4,28 +4,13 @@ host_ips:
   ip1: '192.168.190.145'
 
 - name: 'master.localdomain'
-  ip1: '192.168.190.128'
+  ip1: '192.168.190.148'
+  
+- name: worker1.localdomain
+  ip1: '192.168.190.149'
 
-- name: 'worker1.localdomain'
-  ip1: '192.168.190.127'
 
-- name: tulcptower02.localdomain
-  ip1: '192.168.190.125'
 
-- name: tulcpeda01.localdomain
-  ip1: '192.168.190.134'
-
-- name: tulcpaap01.localdomain
-  ip1: '192.168.190.136'
-
-- name: tulcpaap02.localdomain
-  ip1: '192.168.190.139'
-
-- name: tulcpadb01.localdomain
-  ip1: '192.168.190.143'
-
-- name: tulcpeda02.localdomain
-  ip1: '192.168.190.140'
 
 
   

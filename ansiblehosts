@@ -3,14 +3,19 @@
 [development]
 
 [production]
-tulcpaap01.localdomain      ansible_host=192.168.190.136
-tulcpeda01.localdomain      ansible_host=192.168.190.134
-tulcpadb01.localdomain      ansible_host=192.168.190.143
+master.localdomain     ansible_host=192.168.190.148
+worker1.localdomain      ansible_host=192.168.190.149
 
+[ec2]
+ec2-52-62-99-167.ap-southeast-2.compute.amazonaws.com
 
 [control]
 control.localdomain         ansible_host=192.168.190.145
 
-[all:vars]
+[ec2:vars]
+ansible_user=ec2-user
+ansible_ssh_private_key_file=/home/antogx/anto_keypair_ssh
+
+[production:vars]
 ansible_ssh_user=root
 ansible_ssh_pass=agdotg

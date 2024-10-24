@@ -1,8 +1,12 @@
-- hosts: worker1
+- hosts: ec2
   become: yes
-  gather_facts: false
+  gather_facts: true
   vars:
   tasks:
   - debug:
       msg: "Test"
+  - shell: cat /etc/sudoers
+    register: sudoers
+  - debug:
+      msg: "{{ sudoers.stdout_lines }}"
 

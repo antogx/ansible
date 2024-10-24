@@ -1,0 +1,555 @@
+- hosts: ec2
+  gather_facts: true
+  become: true
+  vars: 
+    rhel7_repos:
+    - rhel-7-server-rpms
+    - rhel-7-server-extras-rpms
+    target_version: 8.9
+    volume_group: 'sys0'
+    physical_volume: '/dev/sdb'
+    mount_point: /var/lib/leapp
+    lv_name: 'leapp_lib'
+    lv_size: '9G'
+    fs_type: 'xfs'
+    vcentre: "{{ 'pa0991vivcr002.vi.det.nsw.edu.au' if '991' in inventory_hostname else 'pa0992vivcr001.vi.det.nsw.edu.au' if '992' in inventory_hostname else '' }}"
+    datacenter: "{{ 'Silverwater Resources' if '991' in inventory_hostname else 'Unanderra Resources' if '992' in inventory_hostname else ''}}"
+  tasks:
+####################################################
+## decision
+  - name: Show distribution and version before the upgrade
+    debug:
+      msg: "{{ ansible_distribution }}-{{ ansible_distribution_major_version }} {{ ansible_distribution_version }}"
+
+  - name: Fail if its a rhel8 server
+    fail:
+      msg: "Its a rhel8 server. Aborting ..."
+    when: ansible_distribution_major_version == '8'
+##################################################
+## yum_clean
+  - name: clean yum/dnf cache 
+    file:
+      path: "{{ item }}"
+      state: absent 
+    loop:
+      - /var/cache/yum
+      - /var/cache/dnf    
+
+  - name: Get fresh facts
+    setup:  
+##################################################
+## Disable tuned service
+  - name: Disable Tuned service
+    service:
+      name: tuned.service
+      state: stopped
+      enabled: false
+
+  - name: Unset RHSM release
+    community.general.rhsm_release:
+      release: null
+##################################################
+## Repos
+  - name: Enable the rhel-7 Repos
+    rhsm_repository: 
+      name: 'rhel-7-server-rpms,rhel-7-server-extras-rpms'
+      state: enabled
+
+  - name: List the currently enabled rhel7 repositories on the system
+    shell: "subscription-manager repos --list-enabled | grep '^Repo ID'|cut -d: -f 2|tr -d ' '"
+    register: enabled_repos
+
+  - name: Show enabled repos on the system
+    debug:
+      var: enabled_repos.stdout_lines
+
+  - name: Fail if the required rhel7 repos not enabled
+    fail:
+      msg: 'Not all the required rhel7 repos enabled'
+    when: "'rhel-7-server-rpms' not in enabled_repos.stdout_lines or 'rhel-7-server-extras-rpms' not in enabled_repos.stdout_lines"
+
+  - name: Install leapp and leapp-repository
+    ansible.builtin.yum:
+      name: leapp-upgrade
+      state: installed
+
+  - name: Do full patching
+    ansible.builtin.yum:
+      name: '*'
+      state: latest
+    register: full_patch
+
+  - name: pause reboot after patching
+    pause:
+    when: full_patch is changed
+
+  - name: Check if reboot is required
+    shell: /usr/bin/needs-restarting -r
+    register: needs_restart
+    failed_when: false
+##################################################
+## reboot
+  - name: Reboot after the patching
+    reboot:
+      msg: "Reboot Initiated part of rhel7 to 8 upgrade"
+      reboot_timeout: 2400
+      pre_reboot_delay: 30
+      post_reboot_delay: 30  
+    when: full_patch is changed or 'Reboot is required' in needs_restart.stdout
+##################################################
+## yum_clean
+  - name: clean yum/dnf cache 
+    file:
+      path: "{{ item }}"
+      state: absent 
+    loop:
+      - /var/cache/yum
+      - /var/cache/dnf
+##################################################
+## check_multiple_devel_kernels
+  - name: Look for multiple kernel-devel
+    shell: rpm -qa | grep kernel-devel
+    register: kernel_devel
+    failed_when: false
+
+  - name: Pause if multiple kernel-devel found. Remove old one 
+    pause:
+      msg: "Remove the old kernel-devel"
+    when: 
+      - kernel_devel.stdout_lines is defined
+      - kernel_devel.stdout_lines|length > 1
+
+## check_eth_nics
+  - name: Ensure there is no more than one NIC with a name based on the prefix used by the kernel (eth)
+    shell: ls /etc/sysconfig/network-scripts/ifcfg-eth*|wc -l
+    register: no_of_eths
+
+  - name: Fail if More than 1 eth interfaces
+    fail:
+      msg: More than 1 eth interfaces
+    when: no_of_eths.stdout|int > 1
+##################################################
+## remove_unsupported_drivers ##modprob -r pata_acpi
+  - name: Remove unsupported device drivers in rhel8
+    modprobe:
+      name: "{{ item }}"
+      state: absent
+    loop: 
+      - pata_acpi
+      - floppy
+##################################################
+# ## change_root_password
+#   - name: Change root password
+#     user:
+#       name: root
+#       password: "{{ 'dragon00'|password_hash('sha512') }}"
+##################################################
+## Umount and disable NFS in fstab as its a blocker for upgrade
+  - name: Check if NFS exists
+    command: grep ' nfs ' /etc/fstab
+    register: nfs_mount
+    failed_when: no
+    
+  - name: Block for Umount and disable NFS in fstab
+    block: 
+      - name: Show NFS if its exists
+        debug:
+          var: nfs_mount.stdout_lines
+        when: nfs_mount.rc == 0
+
+      - name: Check /etc/fstab_leapp_take_orig_bkp exists
+        stat:
+          path: /etc/fstab_leapp_take_orig_bkp
+        register: fstab_bkp
+
+      - name: Take backup if nfs exists
+        copy: 
+          src: /etc/fstab
+          dest: /etc/fstab_leapp_take_orig_bkp
+          remote_src: yes
+        when: not fstab_bkp.stat.exists
+
+      - name: Unmount a mounted volume
+        ansible.posix.mount:
+          path: "{{item.split()[1]}}"
+          state: unmounted
+        loop: "{{ nfs_mount.stdout_lines }}"
+        ignore_errors: yes
+
+      - name: Comment out NFS
+        replace:
+          path: /etc/fstab
+          regexp: '{{ item }}'
+          replace: "#{{ item }}"
+        loop: "{{ nfs_mount.stdout_lines }}"
+
+      - name: Check if NFS exists 
+        command: cat /etc/fstab
+        register: nfs_umount_verify
+        failed_when: no
+
+      - name: Show the /etc/fstab after nfs commented out
+        debug:
+          var: nfs_umount_verify.stdout_lines
+
+      - name: Pause to check the NFS is correctly commented out 
+        pause:
+          prompt: Review the NFS is correctly commented out in fstab 
+    when: nfs_mount.rc == 0
+#################################################################
+  # - name: Create a temporary file 10-crypto-policies to include arcfour-hmac-md5 cipher
+  #   blockinfile: 
+  #     path: /etc/krb5.conf.d/10-crypto-policies
+  #     mode: 0644
+  #     owner: root
+  #     group: root
+  #     block: |
+  #       [libdefaults]
+  #       permitted_enctypes = aes256-cts-hmac-sha1-96 aes256-cts-hmac-sha384-192 camellia256-cts-cmac aes128-cts-hmac-sha1-96 aes128-cts-hmac-sha256-128 camellia128-cts-cmac arcfour-hmac-md5
+  #     create: yes
+
+  # - name: Restart sssd 
+  #   service: 
+  #     name: sssd 
+  #     state: restarted
+
+  # - name: pause after sssd restart 
+  #   pause: 
+  #     seconds: 15
+  #   delegate_to: localhost
+
+  - name: Make sure 'PermitRootLogin yes' in /etc/ssh/sshd_config
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      line: 'PermitRootLogin yes'
+    register: permitrootlogin
+
+  - name: restart sshd 
+    service: 
+      name: sshd 
+      state: restarted
+    when: permitrootlogin is changed
+#################################################################
+## leapp_preupgrade
+  - name: Confirm in Answer file /var/log/leapp/answerfile
+    blockinfile: 
+      path: /var/log/leapp/answerfile
+      block: |
+        [remove_pam_pkcs11_module_check]
+        confirm = True
+
+        [authselect_check]
+        confirm = False
+      create: yes
+
+  - name: Leapp Pre-upgrade
+    shell: "leapp preupgrade"
+
+  - name: Pause to read the output file.
+    pause:
+      prompt: "Examine the report in the /var/log/leapp/leapp-report.txt file and manually resolve all the problems, before continue with upgrade process.."
+
+  - name: Confirm to continue with upgrade
+    pause:
+      prompt: "Enter to continue with upgrade process.."
+#################################################################
+## leapp_upgrade
+  - name: Leapp Upgrade
+    shell: "leapp upgrade"
+    register: leapp_upgrade
+#################################################################
+  - name: Confirm for reboot after upgrade
+    pause:
+      prompt: "Enter to continue with reboot.."
+## reboot
+  - name: Reboot after the upgrade
+    reboot:
+      msg: "Reboot Initiated part of rhel7 to 8 upgrade"
+      reboot_timeout: 3000
+      pre_reboot_delay: 30
+      post_reboot_delay: 30 
+#################################################################
+## set_python3
+  # - name: After reboot | Create /usr/bin/python soft link in rhel8 for seemless ansible operation
+  #   raw: ln -s /usr/bin/python3 /usr/bin/python
+  #   ignore_errors: yes
+  - name: 'Set python interpreter to /usr/bin/python3 since /usr/bin/python is no longer available'
+    set_fact:
+      ansible_python_interpreter: /usr/bin/python3
+
+  - name: 'Set python version to python 3'
+    shell: alternatives --set python /usr/bin/python3
+#################################################################
+## post_upgrade_verification
+  - name: Get rhel8 facts after upgrade
+    setup:
+
+  - name: Show distribution and version after upgrade
+    debug:
+      msg: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+  - name: Pause to verify the upgraded OS version
+    pause:
+      prompt: "See the OS version and continue all good.."
+
+#################################################################
+## add_permitted_enctypes to crypto-policies
+  # - name: Add encryption type arcfour-hmac-md5 to crypto-policies
+  #   ansible.builtin.lineinfile:
+  #     path: /etc/krb5.conf.d/crypto-policies
+  #     regexp: '^permitted_enctypes'
+  #     line: permitted_enctypes = aes256-cts-hmac-sha1-96 aes256-cts-hmac-sha384-192 camellia256-cts-cmac aes128-cts-hmac-sha1-96 aes128-cts-hmac-sha256-128 camellia128-cts-cmac arcfour-hmac-md5
+
+  # - name: Cleanup temporary /etc/krb5.conf.d/10-crypto-policies file 
+  #   file:
+  #     path: /etc/krb5.conf.d/10-crypto-policies
+  #     state: absent
+
+  # - name: Restart sssd 
+  #   service: 
+  #     name: sssd 
+  #     state: restarted
+
+  # - name: pause after sssd restart 
+  #   pause: 
+  #     seconds: 15
+  #   delegate_to: localhost
+##################################################
+## post_upgrade_cleanup
+  - name: Remove all packages from the exclude list
+    command: yum config-manager --save --setopt exclude=''
+
+  - name: Find | rhel7 old kernel versions
+    find:
+      path: /lib/modules
+      file_type: directory
+      patterns: ['*.el7*']
+      recurse: no
+    register: rhel7_kernel_modules
+
+  - name: set_fact | old_rhel7_kernel_modules []
+    set_fact: 
+      old_rhel7_kernel_modules: []
+
+  - name: set_fact | old_rhel7_kernel_modules
+    set_fact: 
+      old_rhel7_kernel_modules: "{{ old_rhel7_kernel_modules + [item.path.split('/')[-1]] }}"
+    loop: "{{ rhel7_kernel_modules.files }}"
+
+  - name: show old rhel7 kernels
+    debug:
+      var: old_rhel7_kernel_modules
+
+  - name: Remove weak modules from the old kernel
+    shell: /usr/sbin/weak-modules --remove-kernel {{ item }}
+    ignore_errors: true
+    loop: "{{ old_rhel7_kernel_modules }}"
+
+  - name: Remove the old kernel from the boot loader entry.
+    shell: /bin/kernel-install remove {{ item }} /lib/modules/{{ item }}/vmlinuz
+    loop: "{{ old_rhel7_kernel_modules }}"
+    ignore_errors: true
+
+  - name: List | any leftover rhel7 packages
+    shell: rpm -qa | grep -e '\.el[67]' | grep -vE '^(gpg-pubkey|libmodulemd|katello-ca-consumer)' | sort
+    register: el7_rpms
+
+  - name: list rhel7 el7_rpms
+    debug:
+      msg: "{{ el7_rpms.stdout_lines }}"
+
+  - name: Pause to confirm the removal of rhel7 rpms 
+    pause:
+      prompt: "Confirm the removal of rhel7 rpms.."
+
+  - name: Remove any leftover rhel7 packages
+    yum:
+      name: "{{ el7_rpms.stdout_lines }}"
+      state: absent
+
+  - name: Remove remaining Leapp dependency packages
+    yum:
+      name: 
+        - leapp-deps-el8
+        - leapp-repository-deps-el8
+      state: absent
+
+  - name: Find any remaining empty directories
+    find:
+      path: /lib/modules
+      file_type: directory
+      patterns: ['*.el7*']
+      recurse: no
+    register: rhel7_kernel_modules
+
+  - name: Remove rhel7 empty directories
+    file:
+      path: "{{ item.path }}"
+      state: absent 
+    loop: "{{ rhel7_kernel_modules.files }}"
+
+  - name: Find | rhel7 old rescue kernel
+    find:
+      path: /boot
+      patterns: ['vmlinuz-*rescue*', 'initramfs-*rescue*']
+      recurse: no
+    register: rhel7_rescue_kernel
+
+  - name: Remove rhel7 old rescue kernel
+    file:
+      path: "{{ item.path }}"
+      state: absent 
+    loop: "{{ rhel7_rescue_kernel.files }}"
+
+  - name: dnf reinstall kernel-core
+    shell: dnf reinstall -y kernel-core-$(uname -r)
+
+  - name: Remove all remaining upgrade-related data from the system
+    file:
+      path: "{{ item }}"
+      state: absent 
+    loop: 
+      - /var/log/leapp 
+      - /root/tmp_leapp_py3 
+#################################################################
+## post_upgrade_kernel_check
+  - name: Verify no el7 kernel in bootloader
+    shell: 'grubby --info=ALL | grep "el7" || echo "Old kernels are not present in the bootloader."'
+    register: grubby_info
+
+  - name: Show if el7 kernel in grubby --info=ALL output
+    debug:
+      msg: "Warning: grubby --info shows el7 kernels"
+    when: "'el7' in grubby_info.stdout"
+
+  - name: Verify rescue initial RAM disk files have been created for the current kernel
+    shell: 'lsinitrd /boot/initramfs-*rescue*.img | grep -m1 "$(uname -r)/kernel/"'
+    ignore_errors: True
+    register: initramfs
+
+  - name: show rhel8 in initramsfs
+    debug:
+      msg: "{{ initramfs.stdout_lines }}"
+
+#################################################################
+#Enable nfs and mount it
+  - name: Check /etc/fstab_leapp_take_orig_bkp exists
+    stat:
+      path: /etc/fstab_leapp_take_orig_bkp
+    register: fstab_bkp
+
+  - name: block | Enable and mount NFS
+    block:
+      - name: Restore fstab backup
+        copy: 
+          src: /etc/fstab_leapp_take_orig_bkp
+          dest: /etc/fstab
+          remote_src: yes
+
+      - name: Check if NFS exists
+        command: cat /etc/fstab
+        register: fstab
+        failed_when: no
+
+      - name: Show the /etc/fstab after nfs enabled in fstab
+        debug:
+          var: fstab.stdout_lines
+
+      - name: Pause to check the fstab after enabled NFS 
+        pause:
+          prompt: Review the fstab after NFS enabled 
+      
+      - name: Mount all
+        command: mount -a
+        ignore_errors: true 
+
+      - name: Get the mounted NFS
+        command: df -h 
+        register: df
+
+      - name: Show all mounted
+        debug:
+          var: df.stdout_lines
+
+      - name: Pause to verify all including NFS mounted 
+        pause:
+          prompt: Pause to verify all including NFS mounted
+          
+    when: fstab_bkp.stat.exists
+#################################################################
+## disable_firewalld
+  - name: Disable firewalld 
+    service:
+      name: firewalld 
+      state: stopped
+      enabled: false
+    ignore_errors: true
+#################################################################
+## enable_selinux
+  # - name: Enable SELinux
+  #   ansible.posix.selinux:
+  #     policy: targeted
+  #     state: enforcing
+#################################################################
+
+#   - name: Kill the process if /var/lib/leapp busy
+#     command: fuser -cuk /var/lib/leapp
+#     ignore_errors: true
+
+# ## Unmount and cleanup the leapp file system
+#   - name: 'Unmount the Leapp Filesystem'
+#     mount:
+#       path: "{{ mount_point }}"
+#       state: absent
+
+#   - name: 'Remove the Leapp LV'
+#     lvol:
+#       vg: "{{ volume_group }}"
+#       lv: "{{ lv_name }}"
+#       state: absent
+#       force: yes
+#################################################################
+# ## assign_cv_env
+#   - name: set_fact | env
+#     set_fact:
+#       env: "{{ 'PRD' if inventory_hostname.lower().startswith(('p', 'e')) else 'DEV' if inventory_hostname.lower().startswith(('d', 'c', 'b'))
+#             else 'PRE' if inventory_hostname.lower().startswith(('q')) else 'TST' if inventory_hostname.lower().startswith(('t')) }}"
+
+#   - name: set_fact | os_major
+#     set_fact:
+#       os_major: "{{ 'RHEL7' if ansible_distribution_major_version == '7' else 'RHEL8' if ansible_distribution_major_version == '8' else 
+#               'RHEL9' if ansible_distribution_major_version == '9'}}"
+    
+#   - name: set_fact | activation_key
+#     set_fact: 
+#       activation_key: "DET-{{os_major}}-{{env}}-x86_64"
+
+#   - name: Show activation Key 
+#     debug:
+#       var: activation_key
+
+#   - name: subscription-manager unregister
+#     command: subscription-manager unregister
+#     ignore_errors: true
+
+#   - name: subscription-manager clean
+#     command: subscription-manager clean
+#     ignore_errors: true
+
+#   - name: Register to satellite | Assign correct CV and environment using key {{ activation_key }}
+#     redhat_subscription:
+#       state: present
+#       force_register: True
+#       activationkey: "{{ activation_key }}"
+#       org_id: NSW_DET
+
+  - name: Set RHSM release to 8
+    community.general.rhsm_release:
+      release: "8"
+
+  - name: Show the rhsm release
+    command: subscription-manager release --show
+    register: rhsm_release
+
+  - debug:
+      var: rhsm_release.stdout
